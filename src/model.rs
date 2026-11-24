@@ -7,6 +7,8 @@ pub enum ModelError {
     Format(#[from] icexiv_data::mdl::Error),
     #[error("invalid equipment geometry: {0}")]
     Geometry(&'static str),
+    #[error("model positions coincide; no visible extent")]
+    NoVisibleExtent,
 }
 
 /// Bind-pose triangle geometry, normalized for a bounds-fitted orbit camera.
@@ -33,14 +35,33 @@ impl EquipmentModel {
             .collect::<Result<Vec<_>, ModelError>>()?;
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = -min;
-        for range in mdl.lod(0)?.ranges {
-            if !matches!(range.role, MeshRole::Normal | MeshRole::Glass) {
+        let ranges = mdl.lod(0)?.ranges;
+        let primary = ranges
+            .iter()
+            .any(|r| r.count != 0 && matches!(r.role, MeshRole::Normal | MeshRole::Glass));
+        let mut slots = vec![None; names.len()];
+        let mut active_names = Vec::new();
+        for range in ranges {
+            if !(matches!(range.role, MeshRole::Normal | MeshRole::Glass)
+                || !primary
+                    && matches!(
+                        range.role,
+                        MeshRole::Water
+                            | MeshRole::LightShaft
+                            | MeshRole::CrestChange
+                            | MeshRole::MaterialChange
+                            | MeshRole::VerticalFog
+                    ))
+            {
                 continue;
             }
             let start = usize::from(range.start);
             for mesh in start..start + usize::from(range.count) {
                 let geometry = mdl.geometry(0, mesh)?;
                 let meta = geometry.metadata();
+                if meta.index_count == 0 {
+                    continue;
+                }
                 let base = vertices.len();
                 if base + usize::from(meta.vertex_count) > 1_000_000
                     || u64::from(meta.index_count) + indices.len() as u64 > 6_000_000
@@ -84,7 +105,11 @@ impl EquipmentModel {
                 if slot >= names.len() {
                     return Err(Geometry("missing mesh material slot"));
                 }
-                parts.push((slot, first..indices.len() as u32));
+                let active = *slots[slot].get_or_insert_with(|| {
+                    active_names.push(names[slot].clone());
+                    active_names.len() - 1
+                });
+                parts.push((active, first..indices.len() as u32));
             }
         }
         if indices.is_empty() {
@@ -92,6 +117,9 @@ impl EquipmentModel {
         }
         let half = max * 0.5 - min * 0.5;
         let radius = half.length();
+        if min == max {
+            return Err(ModelError::NoVisibleExtent);
+        }
         if !radius.is_finite() || radius <= f32::MIN_POSITIVE {
             return Err(Geometry("invalid bounds"));
         }
@@ -104,11 +132,15 @@ impl EquipmentModel {
             vertices,
             indices,
             parts,
-            names,
+            names: active_names,
         })
     }
 
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
+    }
+    /// Slot order used by the GPU and by `setMaterial` in the web viewer.
+    pub fn material_names(&self) -> &[String] {
+        &self.names
     }
 }

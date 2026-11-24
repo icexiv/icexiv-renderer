@@ -1,7 +1,9 @@
 //! FFXIV static equipment preview. Input is a logical MDL extracted from SqPack.
 mod material;
 mod model;
-pub use material::{MaterialError, color_texture_path};
+mod paths;
+pub use material::{MaterialError, base_color_texture, color_texture_path};
+pub use paths::material_paths;
 
 /// Exercise the same color decode as `setMaterial` without a GPU (asset preparation).
 pub fn validate_material(

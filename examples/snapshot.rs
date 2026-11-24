@@ -28,16 +28,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 other => other?,
             };
-            let texture = icexiv_renderer::color_texture_path(&bytes)?;
-            let tex = fs::read(
-                root.join(
-                    std::path::Path::new(texture)
-                        .file_name()
-                        .ok_or("invalid texture name")?,
-                ),
-            )?;
+            let texture = icexiv_renderer::base_color_texture(&bytes)?;
+            let tex = if let Some(texture) = texture {
+                fs::read(
+                    root.join(
+                        std::path::Path::new(texture)
+                            .file_name()
+                            .ok_or("invalid texture name")?,
+                    ),
+                )?
+            } else {
+                Vec::new()
+            };
             renderer.set_material(&mut gpu_model, slot, &bytes, &tex)?;
-            eprintln!("slot {slot}: {name} ← {texture}");
+            eprintln!("slot {slot}: {name} ← {}", texture.unwrap_or("inline"));
         }
     }
     const S: u32 = 512; // 4*S is aligned for texture readback.

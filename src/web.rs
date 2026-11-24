@@ -29,6 +29,18 @@ pub fn material_variant(imc: &[u8], subset: u16, part: u8) -> Result<u8, JsError
     crate::material_variant(imc, subset, part).map_err(error)
 }
 
+#[wasm_bindgen(js_name = baseColorTexture)]
+pub fn base_color_texture(material: &[u8]) -> Result<Option<String>, JsError> {
+    crate::base_color_texture(material)
+        .map(|p| p.map(str::to_owned))
+        .map_err(error)
+}
+
+#[wasm_bindgen(js_name = materialPaths)]
+pub fn material_paths(model: &str, reference: &str, variant: Option<u16>) -> Vec<String> {
+    crate::material_paths(model, reference, variant)
+}
+
 #[wasm_bindgen]
 impl EquipmentViewer {
     pub async fn create(canvas: HtmlCanvasElement) -> Result<EquipmentViewer, JsError> {

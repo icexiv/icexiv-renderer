@@ -394,7 +394,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "icexiv-data"
 version = "0.1.0"
-source = "git+https://github.com/icexiv/icexiv-data.git?rev=1486cc4b0a21b1568574a9e17154591b5b699c54#1486cc4b0a21b1568574a9e17154591b5b699c54"
+source = "git+https://github.com/icexiv/icexiv-data.git?rev=919ffe3c9b0b4f64337a2bf12ebc94c5bffa6fa6#919ffe3c9b0b4f64337a2bf12ebc94c5bffa6fa6"
 dependencies = [
  "bcdec_rs",
  "binrw",

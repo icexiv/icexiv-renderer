@@ -8,7 +8,7 @@ publish = false
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-icexiv-data = { git = "https://github.com/icexiv/icexiv-data.git", rev = "1486cc4b0a21b1568574a9e17154591b5b699c54" }
+icexiv-data = { git = "https://github.com/icexiv/icexiv-data.git", rev = "919ffe3c9b0b4f64337a2bf12ebc94c5bffa6fa6" }
 wgpu = "29.0.3"
 glam = "0.30"
 bytemuck = { version = "1", features = ["derive"] }

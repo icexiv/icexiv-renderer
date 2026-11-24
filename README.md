@@ -1,6 +1,6 @@
 # icexiv-renderer
 
-FFXIV 装备 MDL 静态预览器。Rust 和浏览器共用 `icexiv-data` 解析器、wgpu 绘制管线和 WGSL 着色器。输入为从 SqPack 提取的 Win32 `0x01000006` **逻辑 MDL 文件**；可以直接传 `SqPack::read(path)` 的结果。
+FFXIV 装备 MDL 静态预览器。Rust 和浏览器共用 `icexiv-data` 解析器、wgpu 绘制管线和 WGSL 着色器。输入为从 SqPack 提取的 Win32 `0x01000005` 或 `0x01000006` **逻辑 MDL 文件**；可以直接传 `SqPack::read(path)` 的结果。
 
 预览显示 LOD 0 的 normal/glass 网格，自动居中，以相机相对光源显示绑定姿势。传入配套 MTRL 和 TEX 后，每个材质槽可使用索引图与 Dawntrail 色表、或漫反射贴图绘制装备配色。只传 MDL 时显示中性材质。轨道相机与灯光基于 `xiv-companion` (`1a7950a`) 的 `renderer/model/material/uniforms.rs`。支持的采样器和外观限制见[装备模型预览](docs/README.md)，按变体绑定材质见[宿主集成](docs/integration.md)。
 

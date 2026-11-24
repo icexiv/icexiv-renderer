@@ -16,12 +16,17 @@ pub enum MaterialError {
 enum Source {
     Index,
     Diffuse,
+    Solid([u8; 4]),
 }
 
-fn source<'a>(m: &Mtrl<'a>) -> Result<(Source, &'a str), MaterialError> {
+fn source<'a>(m: &Mtrl<'a>, inline: bool) -> Result<(Source, &'a str), MaterialError> {
     let mut diffuse = None;
+    let mut index = None;
     for i in 0..m.sampler_count() {
         let s = m.sampler(i)?;
+        if s.texture_index == u8::MAX {
+            continue;
+        }
         let role = match s.id {
             0x565f8fd8
                 if m.color_table()?
@@ -36,18 +41,89 @@ fn source<'a>(m: &Mtrl<'a>) -> Result<(Source, &'a str), MaterialError> {
         let path = std::str::from_utf8(tex.path)
             .map_err(|_| MaterialError::Unsupported("texture path is not UTF-8"))?;
         match role {
-            Source::Index => return Ok((role, path)),
+            Source::Index => index = Some((role, path)),
             Source::Diffuse => diffuse = Some((role, path)),
+            Source::Solid(_) => unreachable!(),
         }
     }
-    diffuse.ok_or(MaterialError::Unsupported(
+    // When every row has the same diffuse value an index map cannot
+    // affect the base-color pass (including materials with no bound index).
+    if inline
+        && (index.is_some() || diffuse.is_none())
+        && matches!(
+            m.shader_package()?,
+            b"character.shpk" | b"characterlegacy.shpk" | b"characterreflection.shpk"
+        )
+        && let Some(table) = m.color_table()?
+    {
+        let rgb = table.row(0)?.diffuse();
+        if rgb.iter().all(|x| x.is_finite())
+            && (1..table.row_count()).all(|i| table.row(i).is_ok_and(|r| r.diffuse() == rgb))
+        {
+            let [r, g, b] = rgb.map(|v| (255. * v.clamp(0., 1.)).round() as u8);
+            return Ok((Source::Solid([r, g, b, 255]), ""));
+        }
+    }
+    if inline && index.is_none() && diffuse.is_none() {
+        let tint = match m.shader_package()? {
+            b"lightshaft.shpk" => Some(0xd27c58b9), // g_Color
+            b"water.shpk" => Some(0xd315e728),      // g_WaterDeepColor
+            _ => None,
+        };
+        for i in 0..m.constant_count() {
+            if Some(m.constant(i)?.id) != tint {
+                continue;
+            }
+            let mut values = m.constant_floats(i)?;
+            if let (Some(r), Some(g), Some(b)) = (values.next(), values.next(), values.next()) {
+                let rgb = [r, g, b];
+                if rgb.iter().all(|v| v.is_finite()) {
+                    let [r, g, b] = rgb.map(|v| (255. * v.clamp(0., 1.)).round() as u8);
+                    return Ok((Source::Solid([r, g, b, 255]), ""));
+                }
+            }
+        }
+    }
+    index.or(diffuse).ok_or(MaterialError::Unsupported(
         "material has no supported color source",
     ))
 }
 
-/// Logical TEX path for the supported color pass, taken from the sampler binding.
+/// Logical sampler TEX for hosts supporting textured materials only.
 pub fn color_texture_path(bytes: &[u8]) -> Result<&str, MaterialError> {
-    Ok(source(&Mtrl::parse(bytes)?)?.1)
+    Ok(source(&Mtrl::parse(bytes)?, false)?.1)
+}
+/// None when the base-color pass needs only MTRL bytes.
+pub fn base_color_texture(bytes: &[u8]) -> Result<Option<&str>, MaterialError> {
+    let (_, path) = source(&Mtrl::parse(bytes)?, true)?;
+    Ok((!path.is_empty()).then_some(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_lightshaft_color_does_not_require_a_dummy_texture() {
+        let shader = b"lightshaft.shpk\0";
+        let mut bytes = vec![0; 16];
+        bytes[..4].copy_from_slice(&0x0103_0000u32.to_le_bytes());
+        bytes[8..10].copy_from_slice(&(shader.len() as u16).to_le_bytes());
+        bytes.extend(shader);
+        bytes.extend([12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]);
+        bytes.extend(0xd27c58b9u32.to_le_bytes());
+        bytes.extend([0, 0, 12, 0]);
+        for f in [0.25f32, 0.5, 1.] {
+            bytes.extend(f.to_le_bytes());
+        }
+        let length = bytes.len() as u16;
+        bytes[4..6].copy_from_slice(&length.to_le_bytes());
+        assert!(base_color_texture(&bytes).unwrap().is_none());
+        let pixels = Pixels::decode(&bytes, &[], 1).unwrap();
+        assert_eq!(pixels.rgba, [64, 128, 255, 255]);
+        assert!(!pixels.srgb);
+        assert!(Pixels::decode(&bytes, &[], 0).is_err());
+    }
 }
 
 pub(crate) struct Pixels {
@@ -109,7 +185,19 @@ impl Pixels {
     }
     pub fn decode(material: &[u8], texture: &[u8], max_side: u32) -> Result<Self, MaterialError> {
         let m = Mtrl::parse(material)?;
-        let (source, _) = source(&m)?;
+        let (source, _) = source(&m, true)?;
+        if let Source::Solid(color) = source {
+            if max_side == 0 {
+                return Err(MaterialError::Unsupported(
+                    "no mip fits preview texture budget",
+                ));
+            }
+            return Ok(Self {
+                size: [1, 1],
+                rgba: color.to_vec(),
+                srgb: false,
+            });
+        }
         let tex = Tex::parse(texture)?;
         if tex.layout() != Layout::D2 {
             return Err(MaterialError::Unsupported("expected a 2D color source"));

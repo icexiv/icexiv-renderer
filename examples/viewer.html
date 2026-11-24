@@ -7,7 +7,7 @@
 <icexiv-equipment-canvas></icexiv-equipment-canvas>
 <script type="module">
 import "../pkg/component.js";
-import {colorTexturePath} from "../pkg/icexiv_renderer.js";
+import {baseColorTexture} from "../pkg/icexiv_renderer.js";
 const stage = document.querySelector("icexiv-equipment-canvas"), input = document.querySelector("input");
 const status = document.querySelector("output");
 try {
@@ -30,10 +30,10 @@ try {
         const material = byName.get(name.split("/").pop());
         if(!material){notes.push(`缺少 ${name}`);continue;}
         try {
-          const bytes = await read(material), path = colorTexturePath(bytes);
-          const texture = byName.get(path.split("/").pop());
-          if(!texture) throw Error(`缺少 ${path}`);
-          viewer.setMaterial(slot,bytes,await read(texture));
+          const bytes = await read(material), path = baseColorTexture(bytes);
+          const texture = path && byName.get(path.split("/").pop());
+          if(path && !texture) throw Error(`缺少 ${path}`);
+          viewer.setMaterial(slot,bytes,texture ? await read(texture) : new Uint8Array());
         } catch(e){notes.push(`${name}: ${e.message}`);}
       }
       stage.show();
