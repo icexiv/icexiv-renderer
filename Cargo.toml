@@ -1,0 +1,24 @@
+[package]
+name = "icexiv-renderer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+icexiv-data = { git = "https://github.com/icexiv/icexiv-data.git", rev = "1486cc4b0a21b1568574a9e17154591b5b699c54" }
+wgpu = "29.0.3"
+glam = "0.30"
+bytemuck = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+
+[dev-dependencies]
+pollster = "0.4"
+png = "0.17"

@@ -1,0 +1,27 @@
+//! FFXIV static equipment preview. Input is a logical MDL extracted from SqPack.
+mod material;
+mod model;
+pub use material::{MaterialError, color_texture_path};
+
+/// Exercise the same color decode as `setMaterial` without a GPU (asset preparation).
+pub fn validate_material(
+    material: &[u8],
+    texture: &[u8],
+    max_side: u32,
+) -> Result<(), MaterialError> {
+    material::Pixels::decode(material, texture, max_side).map(|_| ())
+}
+
+/// Material directory selector from an IMC subset and part mask bit.
+pub fn material_variant(imc: &[u8], subset: u16, part: u8) -> Result<u8, icexiv_data::imc::Error> {
+    Ok(icexiv_data::imc::Imc::parse(imc)?
+        .entry(subset, part)?
+        .material_id)
+}
+mod render;
+pub use model::{EquipmentModel, ModelError};
+pub use render::{GpuModel, Renderer};
+pub use wgpu;
+
+#[cfg(target_arch = "wasm32")]
+mod web;

@@ -1,0 +1,5 @@
+/target
+/pkg
+/.direnv
+/result
+/notist-output

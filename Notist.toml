@@ -1,0 +1,11 @@
+[package]
+name = "icexiv-renderer"
+
+[site]
+title = "IceXIV Renderer"
+content = "docs"
+theme = "builtins.book"
+directory_urls = true
+
+[site.extensions.builtins.book]
+select = true
