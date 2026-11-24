@@ -2,7 +2,7 @@
 mod material;
 mod model;
 mod paths;
-pub use material::{MaterialError, base_color_texture, color_texture_path};
+pub use material::{MaterialError, base_color_texture, color_texture_path, diffuse_overlay};
 pub use paths::material_paths;
 
 /// Exercise the same color decode as `setMaterial` without a GPU (asset preparation).
@@ -12,6 +12,15 @@ pub fn validate_material(
     max_side: u32,
 ) -> Result<(), MaterialError> {
     material::Pixels::decode(material, texture, max_side).map(|_| ())
+}
+
+pub fn validate_material_with_diffuse(
+    material: &[u8],
+    texture: &[u8],
+    diffuse: &[u8],
+    max_side: u32,
+) -> Result<(), MaterialError> {
+    material::Pixels::decode_with_diffuse(material, texture, diffuse, max_side).map(|_| ())
 }
 
 /// Material directory selector from an IMC subset and part mask bit.

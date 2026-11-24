@@ -41,6 +41,13 @@ pub fn material_paths(model: &str, reference: &str, variant: Option<u16>) -> Vec
     crate::material_paths(model, reference, variant)
 }
 
+#[wasm_bindgen(js_name = diffuseOverlay)]
+pub fn diffuse_overlay(material: &[u8]) -> Result<Option<String>, JsError> {
+    crate::diffuse_overlay(material)
+        .map(|p| p.map(str::to_owned))
+        .map_err(error)
+}
+
 #[wasm_bindgen]
 impl EquipmentViewer {
     pub async fn create(canvas: HtmlCanvasElement) -> Result<EquipmentViewer, JsError> {
@@ -196,6 +203,27 @@ impl EquipmentViewer {
                 slot,
                 material,
                 texture,
+            )
+            .map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = setMaterialWithDiffuse)]
+    pub fn set_material_with_diffuse(
+        &mut self,
+        slot: usize,
+        material: &[u8],
+        texture: &[u8],
+        diffuse: &[u8],
+    ) -> Result<(), JsError> {
+        self.renderer
+            .set_material_with_diffuse(
+                self.model
+                    .as_mut()
+                    .ok_or_else(|| error("call setModel first"))?,
+                slot,
+                material,
+                texture,
+                diffuse,
             )
             .map_err(error)
     }

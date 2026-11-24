@@ -99,6 +99,25 @@ pub fn base_color_texture(bytes: &[u8]) -> Result<Option<&str>, MaterialError> {
     Ok((!path.is_empty()).then_some(path))
 }
 
+/// Legacy character materials may modulate a diffuse map with indexed table colors.
+/// The primary texture remains unchanged for single-texture SDK consumers.
+pub fn diffuse_overlay(bytes: &[u8]) -> Result<Option<&str>, MaterialError> {
+    let m = Mtrl::parse(bytes)?;
+    if m.shader_package()? == b"characterlegacy.shpk"
+        && matches!(source(&m, false), Ok((Source::Index, _)))
+    {
+        for i in 0..m.sampler_count() {
+            let s = m.sampler(i)?;
+            if s.id == 0x115306be && s.texture_index != u8::MAX {
+                return std::str::from_utf8(m.texture(usize::from(s.texture_index))?.path)
+                    .map(Some)
+                    .map_err(|_| MaterialError::Unsupported("texture path is not UTF-8"));
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,8 +203,66 @@ impl Pixels {
         count
     }
     pub fn decode(material: &[u8], texture: &[u8], max_side: u32) -> Result<Self, MaterialError> {
+        Self::decode_with_diffuse(material, texture, &[], max_side)
+    }
+    pub fn decode_with_diffuse(
+        material: &[u8],
+        texture: &[u8],
+        overlay: &[u8],
+        max_side: u32,
+    ) -> Result<Self, MaterialError> {
         let m = Mtrl::parse(material)?;
         let (source, _) = source(&m, true)?;
+        if !overlay.is_empty() {
+            let (size, mut rgba) = decode_tex(overlay, max_side)?;
+            let table = m
+                .color_table()?
+                .ok_or(MaterialError::Unsupported("missing color table"))?;
+            let rows = (0..table.row_count())
+                .map(|i| table.row(i).map(|r| r.diffuse()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let index = if matches!(source, Source::Solid(_)) {
+                None
+            } else {
+                Some(decode_tex(texture, max_side)?)
+            };
+            for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+                let tint = if let Some(([w, h], data)) = &index {
+                    let x = (i % size[0] as usize) * *w as usize / size[0] as usize;
+                    let y = (i / size[0] as usize) * *h as usize / size[1] as usize;
+                    let j = 4 * (y * *w as usize + x);
+                    let pair = ((usize::from(data[j]) * (rows.len() / 2 - 1) + 127) / 255) * 2;
+                    let f = f32::from(data[j + 1]) / 255.;
+                    std::array::from_fn(|k| rows[pair][k] * f + rows[pair + 1][k] * (1. - f))
+                } else {
+                    rows[0]
+                };
+                for (c, t) in px[..3].iter_mut().zip(tint) {
+                    if t == 1. {
+                        continue;
+                    }
+                    let v = f32::from(*c) / 255.;
+                    let linear = if v <= 0.04045 {
+                        v / 12.92
+                    } else {
+                        ((v + 0.055) / 1.055).powf(2.4)
+                    };
+                    let v = (linear * t).clamp(0., 1.);
+                    *c = (255.
+                        * if v <= 0.0031308 {
+                            12.92 * v
+                        } else {
+                            1.055 * v.powf(1. / 2.4) - 0.055
+                        })
+                    .round() as u8;
+                }
+            }
+            return Ok(Self {
+                size,
+                rgba,
+                srgb: true,
+            });
+        }
         if let Source::Solid(color) = source {
             if max_side == 0 {
                 return Err(MaterialError::Unsupported(
@@ -198,17 +275,7 @@ impl Pixels {
                 srgb: false,
             });
         }
-        let tex = Tex::parse(texture)?;
-        if tex.layout() != Layout::D2 {
-            return Err(MaterialError::Unsupported("expected a 2D color source"));
-        }
-        let mip = tex
-            .mips()
-            .find(|m| u32::from(m.width().max(m.height())) <= max_side.min(4096))
-            .ok_or(MaterialError::Unsupported(
-                "no mip fits preview texture budget",
-            ))?;
-        let mut rgba = mip.decode_rgba8(64 * 1024 * 1024)?;
+        let (size, mut rgba) = decode_tex(texture, max_side)?;
         let srgb = matches!(source, Source::Diffuse);
         if let Source::Index = source {
             let table = m
@@ -228,10 +295,23 @@ impl Pixels {
                 px[3] = 255;
             }
         }
-        Ok(Self {
-            size: [u32::from(mip.width()), u32::from(mip.height())],
-            rgba,
-            srgb,
-        })
+        Ok(Self { size, rgba, srgb })
     }
+}
+
+fn decode_tex(texture: &[u8], max_side: u32) -> Result<([u32; 2], Vec<u8>), MaterialError> {
+    let tex = Tex::parse(texture)?;
+    if tex.layout() != Layout::D2 {
+        return Err(MaterialError::Unsupported("expected a 2D color source"));
+    }
+    let mip = tex
+        .mips()
+        .find(|m| u32::from(m.width().max(m.height())) <= max_side.min(4096))
+        .ok_or(MaterialError::Unsupported(
+            "no mip fits preview texture budget",
+        ))?;
+    Ok((
+        [u32::from(mip.width()), u32::from(mip.height())],
+        mip.decode_rgba8(64 * 1024 * 1024)?,
+    ))
 }

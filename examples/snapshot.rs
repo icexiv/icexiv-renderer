@@ -29,18 +29,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 other => other?,
             };
             let texture = icexiv_renderer::base_color_texture(&bytes)?;
-            let tex = if let Some(texture) = texture {
-                fs::read(
-                    root.join(
-                        std::path::Path::new(texture)
-                            .file_name()
-                            .ok_or("invalid texture name")?,
-                    ),
-                )?
-            } else {
-                Vec::new()
+            let read_tex = |path: Option<&str>| -> Result<Vec<u8>, Box<dyn Error>> {
+                Ok(match path {
+                    Some(p) => fs::read(
+                        root.join(
+                            std::path::Path::new(p)
+                                .file_name()
+                                .ok_or("invalid texture name")?,
+                        ),
+                    )?,
+                    None => Vec::new(),
+                })
             };
-            renderer.set_material(&mut gpu_model, slot, &bytes, &tex)?;
+            let diffuse = icexiv_renderer::diffuse_overlay(&bytes)?;
+            renderer.set_material_with_diffuse(
+                &mut gpu_model,
+                slot,
+                &bytes,
+                &read_tex(texture)?,
+                &read_tex(diffuse)?,
+            )?;
             eprintln!("slot {slot}: {name} ← {}", texture.unwrap_or("inline"));
         }
     }

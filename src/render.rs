@@ -238,6 +238,17 @@ impl Renderer {
         material: &[u8],
         texture: &[u8],
     ) -> Result<(), crate::MaterialError> {
+        self.set_material_with_diffuse(model, slot, material, texture, &[])
+    }
+
+    pub fn set_material_with_diffuse(
+        &self,
+        model: &mut GpuModel,
+        slot: usize,
+        material: &[u8],
+        texture: &[u8],
+        diffuse: &[u8],
+    ) -> Result<(), crate::MaterialError> {
         let binding = model
             .materials
             .get_mut(slot)
@@ -245,9 +256,10 @@ impl Renderer {
                 "material slot outside model",
             ))?;
         let hide_backfaces = icexiv_data::mtrl::Mtrl::parse(material)?.shader_flags() & 1 != 0;
-        *binding = self.material_group(crate::material::Pixels::decode(
+        *binding = self.material_group(crate::material::Pixels::decode_with_diffuse(
             material,
             texture,
+            diffuse,
             self.device.limits().max_texture_dimension_2d,
         )?);
         model.cull[slot] = hide_backfaces;

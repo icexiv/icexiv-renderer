@@ -22,7 +22,7 @@ viewer.draw(0.35, 0.1);     // yaw、pitch（弧度）
 `materialNames()` 按槽返回 MDL 引用。宿主用装备变体与资源清单定位 MTRL，传入的资源均为从 SqPack 提取的文件字节。下面的 `read(path)`（返回 `Uint8Array`）和 `manifest` 由宿主提供：
 
 ```js
-import { baseColorTexture, materialVariant } from "./pkg/icexiv_renderer.js";
+import { baseColorTexture, diffuseOverlay, materialVariant } from "./pkg/icexiv_renderer.js";
 
 const variant = materialVariant(imcBytes, subset, partBit);
 for (const [slot, ref] of viewer.materialNames().entries()) {
@@ -30,7 +30,8 @@ for (const [slot, ref] of viewer.materialNames().entries()) {
   const mtrl = await read(path);
   const texturePath = baseColorTexture(mtrl);
   const tex = texturePath ? await read(texturePath) : new Uint8Array();
-  viewer.setMaterial(slot, mtrl, tex);
+  const diffuse = diffuseOverlay(mtrl);
+  viewer.setMaterialWithDiffuse(slot, mtrl, tex, diffuse ? await read(diffuse) : new Uint8Array());
 }
 viewer.draw(0.35, 0.1);
 ```
