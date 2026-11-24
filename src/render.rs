@@ -9,6 +9,8 @@ pub struct GpuModel {
     names: Vec<String>,
     materials: Vec<w::BindGroup>,
     cull: Vec<bool>,
+    glass_slots: Vec<bool>,
+    centers: Vec<Vec3>,
 }
 impl GpuModel {
     pub fn material_names(&self) -> &[String] {
@@ -22,6 +24,8 @@ pub struct Renderer {
     queue: w::Queue,
     pipeline: w::RenderPipeline,
     culled: w::RenderPipeline,
+    glass: w::RenderPipeline,
+    glass_culled: w::RenderPipeline,
     samples: u32,
     format: w::TextureFormat,
     clear: w::Color,
@@ -84,7 +88,7 @@ impl Renderer {
             bind_group_layouts: &[Some(&camera_layout), Some(&material_layout)],
             immediate_size: 0,
         });
-        let make_pipeline = |cull_mode| {
+        let make_pipeline = |cull_mode, glass: bool| {
             device.create_render_pipeline(&w::RenderPipelineDescriptor {
             label: Some("equipment preview"),
             layout: Some(&pipeline_layout),
@@ -100,14 +104,18 @@ impl Renderer {
             },
             fragment: Some(w::FragmentState {
                 module: &shader,
-                entry_point: Some("fs"),
+                entry_point: Some(if glass { "fs_glass" } else { "fs" }),
                 compilation_options: Default::default(),
-                targets: &[Some(format.into())],
+                targets: &[Some(w::ColorTargetState {
+                    format,
+                    blend: glass.then_some(w::BlendState::ALPHA_BLENDING),
+                    write_mask: w::ColorWrites::ALL,
+                })],
             }),
             primitive: w::PrimitiveState{cull_mode,..Default::default()},
             depth_stencil: Some(w::DepthStencilState {
                 format: w::TextureFormat::Depth24Plus,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(!glass),
                 depth_compare: Some(w::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -117,11 +125,13 @@ impl Renderer {
             cache: None,
         })
         };
-        let pipeline = make_pipeline(None);
-        let culled = make_pipeline(Some(w::Face::Back));
+        let pipeline = make_pipeline(None, false);
+        let culled = make_pipeline(Some(w::Face::Back), false);
+        let glass = make_pipeline(None, true);
+        let glass_culled = make_pipeline(Some(w::Face::Back), true);
         let camera = device.create_buffer(&w::BufferDescriptor {
             label: Some("preview camera"),
-            size: 80,
+            size: 96,
             mapped_at_creation: false,
             usage: w::BufferUsages::UNIFORM | w::BufferUsages::COPY_DST,
         });
@@ -138,6 +148,8 @@ impl Renderer {
             queue,
             pipeline,
             culled,
+            glass,
+            glass_culled,
             samples,
             format,
             clear: w::Color::TRANSPARENT,
@@ -177,6 +189,19 @@ impl Renderer {
             names: model.names.clone(),
             materials: vec![fallback; model.names.len()],
             cull: vec![false; model.names.len()],
+            glass_slots: vec![false; model.names.len()],
+            centers: model
+                .parts
+                .iter()
+                .map(|(_, range)| {
+                    let indices = &model.indices[range.start as usize..range.end as usize];
+                    indices
+                        .iter()
+                        .map(|&i| Vec3::from_slice(&model.vertices[i as usize]))
+                        .sum::<Vec3>()
+                        / indices.len() as f32
+                })
+                .collect(),
         }
     }
 
@@ -255,7 +280,9 @@ impl Renderer {
             .ok_or(crate::MaterialError::Unsupported(
                 "material slot outside model",
             ))?;
-        let hide_backfaces = icexiv_data::mtrl::Mtrl::parse(material)?.shader_flags() & 1 != 0;
+        let m = icexiv_data::mtrl::Mtrl::parse(material)?;
+        let hide_backfaces = m.shader_flags() & 1 != 0;
+        let is_glass = m.shader_package()? == b"characterglass.shpk";
         *binding = self.material_group(crate::material::Pixels::decode_with_diffuse(
             material,
             texture,
@@ -263,6 +290,7 @@ impl Renderer {
             self.device.limits().max_texture_dimension_2d,
         )?);
         model.cull[slot] = hide_backfaces;
+        model.glass_slots[slot] = is_glass;
         Ok(())
     }
 
@@ -337,9 +365,10 @@ impl Renderer {
             distance + 1.05,
         );
         let light = (-0.45 * right + 0.65 * up + 0.65 * dir).normalize();
-        let mut uniform = [0f32; 20];
+        let mut uniform = [0f32; 24];
         uniform[..16].copy_from_slice(&(projection * view).to_cols_array());
         uniform[16..19].copy_from_slice(&light.to_array());
+        uniform[20..23].copy_from_slice(&(dir * distance).to_array());
         self.queue
             .write_buffer(&self.camera, 0, bytemuck::cast_slice(&uniform));
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -373,11 +402,31 @@ impl Renderer {
             pass.set_bind_group(0, &self.group, &[]);
             pass.set_vertex_buffer(0, model.vertices.slice(..));
             pass.set_index_buffer(model.indices.slice(..), w::IndexFormat::Uint32);
-            for (slot, range) in &model.parts {
+            let mut glass_parts = Vec::new();
+            for (i, (slot, range)) in model.parts.iter().enumerate() {
+                if model.glass_slots[*slot] {
+                    glass_parts.push(i);
+                    continue;
+                }
                 pass.set_pipeline(if model.cull[*slot] {
                     &self.culled
                 } else {
                     &self.pipeline
+                });
+                pass.set_bind_group(1, &model.materials[*slot], &[]);
+                pass.draw_indexed(range.clone(), 0, 0..1);
+            }
+            glass_parts.sort_by(|&a, &b| {
+                model.centers[a]
+                    .dot(dir)
+                    .total_cmp(&model.centers[b].dot(dir))
+            });
+            for i in glass_parts {
+                let (slot, range) = &model.parts[i];
+                pass.set_pipeline(if model.cull[*slot] {
+                    &self.glass_culled
+                } else {
+                    &self.glass
                 });
                 pass.set_bind_group(1, &model.materials[*slot], &[]);
                 pass.draw_indexed(range.clone(), 0, 0..1);
