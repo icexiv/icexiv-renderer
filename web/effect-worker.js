@@ -116,6 +116,8 @@ async function dispatch(m) {
       case "clear-offhand":
         viewer.clear_offhand();
         break;
+      case "owner-visible":
+        viewer.set_owner_visible(m.visible);break;
       case "offhand-visible":
         viewer.set_offhand_visible(m.visible);
         break;

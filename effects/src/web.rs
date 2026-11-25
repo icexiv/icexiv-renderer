@@ -287,6 +287,9 @@ impl WeaponEffectViewer {
             .as_ref()
             .map_or_else(Vec::new, |o| o.diagnostics())
     }
+    pub fn set_owner_visible(&mut self, visible: bool) {
+        self.player.set_owner_visible(visible);
+    }
     pub fn set_offhand_visible(&mut self, visible: bool) -> Result<(), JsError> {
         self.player.set_offhand_visible(visible).map_err(err)
     }

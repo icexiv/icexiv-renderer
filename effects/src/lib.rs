@@ -174,6 +174,7 @@ pub struct EffectPlayer {
     particles: Option<WeaponVfxParticles>,
     composite: composite::Composite,
     resident_visible: bool,
+    owner_visible: bool,
     depth: Option<([u32; 2], wgpu::TextureView)>,
     tick: u64,
     resident_origin: u64,
@@ -205,6 +206,10 @@ impl EffectPlayer {
         }
         player
     }
+    /// Keep the prepared owner rig but stop drawing the weapon itself.
+    pub fn set_owner_visible(&mut self, visible: bool) {
+        self.owner_visible = visible;
+    }
     fn from_renderer(renderer: ModelRenderer, mounts: WeaponVfxAttachments) -> Self {
         Self {
             random: Default::default(),
@@ -219,6 +224,7 @@ impl EffectPlayer {
             particles: None,
             composite: Default::default(),
             resident_visible: true,
+            owner_visible: true,
             depth: None,
             tick: 0,
             resident_origin: 0,
@@ -366,7 +372,7 @@ impl EffectPlayer {
         host(self, self.host_tick as f64 / 60.)?;
         let advance = |player: &mut Self| -> Result<()> {
             let (ctx, weapon) = player.renderer.scene_parts();
-            let instances = scene_models(weapon, player.actor.as_ref(), player.offhand.as_ref());
+            let instances = scene_models(weapon, player.actor.as_ref(), player.offhand.as_ref(), player.owner_visible);
             let cam = ctx.scene_camera_snapshot(&instances, size, yaw, pitch, zoom, [0.; 2], opts);
             player.prepare_playback(cam)?;
             if let Some(o) = &mut player.offhand {
@@ -437,7 +443,7 @@ impl EffectPlayer {
             auras.extend(o.unambiguous_active_aura_resources());
         }
         let (ctx, weapon) = self.renderer.scene_parts();
-        let instances = scene_models(weapon, self.actor.as_ref(), self.offhand.as_ref());
+        let instances = scene_models(weapon, self.actor.as_ref(), self.offhand.as_ref(), self.owner_visible);
         let mut batches = Vec::with_capacity(3);
         batches.extend(p.map(|v| v.particles()));
         batches.extend(offhand_particles.map(|v| v.particles()));
@@ -463,9 +469,17 @@ fn scene_models<'a>(
     weapon: &'a scene::ModelInstance,
     actor: Option<&'a actor::Actor>,
     offhand: Option<&'a offhand::Offhand>,
+    owner_visible: bool,
 ) -> Vec<&'a scene::ModelInstance> {
-    std::iter::once(weapon)
+    weapon_instances(weapon, owner_visible)
         .chain(actor.map(|a| &a.mesh))
         .chain(offhand.map(|o| &o.mesh))
         .collect()
+}
+
+fn weapon_instances(
+    weapon: &scene::ModelInstance,
+    owner_visible: bool,
+) -> impl Iterator<Item = &scene::ModelInstance> {
+    std::iter::once(weapon).filter(move |_| owner_visible)
 }
