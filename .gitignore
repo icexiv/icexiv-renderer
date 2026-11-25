@@ -1,4 +1,6 @@
 /target
+/effects/target
+/effects/tools/target
 /pkg
 /.direnv
 /result

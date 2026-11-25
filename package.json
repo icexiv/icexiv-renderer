@@ -9,10 +9,19 @@
       "import": "./pkg/icexiv_renderer.js"
     },
     "./renderer.wasm": "./pkg/icexiv_renderer_bg.wasm",
-    "./component": "./pkg/component.js"
+    "./component": {
+      "types": "./pkg/component.d.ts",
+      "import": "./pkg/component.js"
+    },
+    "./effects": {
+      "types": "./pkg/effects/icexiv_effects.d.ts",
+      "import": "./pkg/effects/icexiv_effects.js"
+    },
+    "./effects.wasm": "./pkg/effects/icexiv_effects_bg.wasm"
   },
   "files": ["pkg"],
   "scripts": {
-    "build": "cargo build --locked --release -j4 --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/icexiv_renderer.wasm && cp web/component.js pkg/"
+    "build": "cargo build --locked --release -j4 --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/icexiv_renderer.wasm && cp web/component.js web/component.d.ts pkg/ && npm run build:effects",
+    "build:effects": "cargo build --locked --lib -j4 --release --target wasm32-unknown-unknown --manifest-path effects/Cargo.toml && wasm-bindgen --target web --out-dir pkg/effects effects/target/wasm32-unknown-unknown/release/icexiv_effects.wasm && cp web/effect-worker.js pkg/effects/"
   }
 }

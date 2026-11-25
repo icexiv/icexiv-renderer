@@ -1,0 +1,8 @@
+{
+  "customize": [1, 0, 1, 50, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "equipment": [
+    {"itemId": 7540, "modelMain": "65677", "equipSlotCategory": 4}
+  ],
+  "pap": "chara/human/c0101/animation/a0001/bt_common/resident/idle.pap",
+  "record": 1
+}

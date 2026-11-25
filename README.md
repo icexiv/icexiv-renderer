@@ -1,14 +1,18 @@
 # icexiv-renderer
 
-FFXIV 装备 MDL 静态预览器。Rust 和浏览器共用 `icexiv-data` 解析器、wgpu 绘制管线和 WGSL 着色器。输入为从 SqPack 提取的 Win32 `0x01000005` 或 `0x01000006` **逻辑 MDL 文件**；可以直接传 `SqPack::read(path)` 的结果。
+FFXIV 模型、骨骼动作和特效预览器，提供 Rust 与 WebGPU 接口。输入为从 SqPack 提取的逻辑文件：装备 MDL（Win32 `0x01000005` 或 `0x01000006`）、材质和纹理、配套的 SKLB／PAP，以及 AVFX 和它引用的资源。
 
 预览显示 LOD 0 的 normal/glass 网格，自动居中，以相机相对光源显示绑定姿势。传入配套 MTRL 和 TEX 后，每个材质槽可使用索引图与 Dawntrail 色表、或漫反射贴图绘制装备配色。只传 MDL 时显示中性材质。轨道相机与灯光基于 `xiv-companion` (`1a7950a`) 的 `renderer/model/material/uniforms.rs`。支持的采样器和外观限制见[装备模型预览](docs/README.md)，按变体绑定材质见[宿主集成](docs/integration.md)。
 
 ## 开发与构建
 
-`nix develop` 提供 Rust（含 WASM 目标）、匹配的 wasm-bindgen CLI、Node.js 和 Notist。`nix build .#native` 构建 Rust 库，`nix build .#sdk` 构建可分发的 Web SDK，`nix build .#site` 构建文档站。使用 `nix flake check` 检查三个产物。在开发环境中运行 `notist build` 可将文档写入 `notist-output/icexiv-renderer/`。
+`nix develop` 提供 Rust（含 WASM 目标）、匹配的 wasm-bindgen CLI、Node.js 和 Notist。`nix build .#native` 构建 Rust 库，`.#sdk` 构建可分发的 Web SDK，`.#action-import` 构建动作资源导出器，`.#site` 构建文档站。使用 `nix flake check` 检查构建产物。在开发环境中运行 `notist build` 可将文档写入 `notist-output/icexiv-renderer/`。
 
 ## Web SDK
+
+[`EquipmentViewer` 与 `SkeletonClip`](docs/motion.md) 支持装备蒙皮和独立骨姿态采样。[武器常驻特效](docs/weapon-effects.md)由 `effects/` 模块按需提供；在同一个场景中绘制武器与特效，可随角色的持械骨更新挂点。
+
+[从 Action ID 播放动作与特效](docs/action.md)给出飞石（119）的资源导出、浏览器示例和 SDK 调用方式。
 
 需要带 `wasm32-unknown-unknown` 标准库的 Rust 工具链、Node/npm 和与 Cargo.lock 匹配的 `wasm-bindgen-cli 0.2.129`。
 

@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>C012 controller WebGPU regression</title>
+<style>icexiv-equipment-canvas{display:block;width:240px;height:240px}</style>
+<icexiv-equipment-canvas></icexiv-equipment-canvas><pre id="result">running</pre>
+<script type="module">
+import "/pkg/component.js";
+// Serve the built SDK under /pkg, exported row-3829 C012 command/AVFX closure
+// under ?action=, a weapon manifest under ?owner=, and CAS files under ?objects=.
+const q=new URLSearchParams(location.search), stage=document.querySelector("icexiv-equipment-canvas");
+const get=async path=>{const r=await fetch(path);if(!r.ok)throw Error(`${r.status}: ${path}`);return r};
+const check=(ok,msg)=>{if(!ok)throw Error(msg)};
+try {
+  const read=async(_,hash)=>new Uint8Array(await (await get(`${q.get("objects")}${hash.slice(0,2)}/${hash.slice(2)}`)).arrayBuffer());
+  const owner=await (await get(q.get("owner"))).json(), action=await (await get(q.get("action"))).json();
+  const cmd=action.effects.find(e=>e.chain.at(-1).command===13 && e.visibility===1);
+  check(cmd?.avfx==="vfx/common/eff/cmab_shoot1c.avfx","expected the retail external shot");
+  await stage.openWeapon(owner,read);stage.pauseScene();
+  const entries=await Promise.all(Object.entries(action.files).map(async ([p,h])=>[p,await read(p,h)]));
+  const preview={units_per_second:30,bindings:cmd.targets.map(target=>({target,position:[0,0,0]})),
+                 controllers:[{occurrence:0,manager_ready:false}]};
+  for(const flags of [1,5]){
+    await stage.playAction([{...cmd,visibility:flags}],preview,entries);
+    await stage.stepScene(3);
+    const status=()=>stage.actionControllerStatus(0);
+    check((await status()).phase==="attached","external controller did not start");
+    if(flags===1)await stage.endActionCommands();
+    else {await stage.setActionController({occurrence:0,state_32:true,manager_ready:false});await stage.stepScene(1);}
+    const detached=await status();
+    check(detached.phase==="detached" && detached.external && detached.trigger_requests===1 &&
+          detached.state_32_stop===(flags===5),"unexpected detached state");
+    await stage.stepScene(2);
+    check((await status()).phase==="detached","premature manager release");
+    await stage.setActionController({occurrence:0,manager_ready:true});
+    check((await stage.stepScene(1)).finished && (await status()).phase==="released","manager did not finish");
+    await stage.stopAction();
+  }
+  document.querySelector("#result").textContent="passed: retail mask 1, controlled mask 5, external tails and release";
+}catch(error){document.querySelector("#result").textContent=`failed: ${error.stack??error}`;throw error}
+</script>

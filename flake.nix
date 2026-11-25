@@ -86,6 +86,51 @@
         native = build {
           installPhaseCommand = "install -Dm644 target/release/libicexiv_renderer.rlib $out/lib/libicexiv_renderer.rlib";
         };
+        action-import = craneLib.buildPackage {
+          pname = "icexiv-action";
+          version = common.version;
+          src = pkgs.lib.fileset.toSource {
+            root = ./effects/tools;
+            fileset = pkgs.lib.fileset.unions [
+              ./effects/tools/Cargo.toml
+              ./effects/tools/Cargo.lock
+              ./effects/tools/import_action.rs
+              ./effects/tools/pack_action.rs
+              ./effects/tools/data_snapshot
+            ];
+          };
+          CARGO_BUILD_JOBS = "3";
+          doCheck = false;
+        };
+        effectSrc = pkgs.lib.fileset.toSource {
+          root = ./effects;
+          fileset = pkgs.lib.fileset.unions [ ./effects/Cargo.toml ./effects/Cargo.lock ./effects/src ./effects/scene ];
+        };
+        effectSdk = craneLib.mkCargoDerivation {
+          pname = "icexiv-weapon-effects-web";
+          version = common.version;
+          src = effectSrc;
+          cargoVendorDir = craneLib.vendorCargoDeps {
+            src = effectSrc;
+            # The companion playback ABI uses an archived revision outside data's main ref.
+            overrideVendorGitCheckout = packages: drv:
+              if pkgs.lib.any (p: p.name == "icexiv-data") packages then drv.overrideAttrs (_: {
+                src = pkgs.fetchFromGitHub {
+                  owner = "icexiv"; repo = "icexiv-data";
+                  rev = "7fa1b24b9cac1b9892e8f6cdf290eb857fc9c08d";
+                  hash = "sha256-CiwelWkbT9V8QV6ZRCuOLbqXRIYd3fjgl1G52S+LevM=";
+                };
+              }) else drv;
+          };
+          cargoArtifacts = null;
+          doInstallCargoArtifacts = false;
+          CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+          nativeBuildInputs = [ cli ];
+          buildPhaseCargoCommand = "cargo build --locked --release --lib -j4";
+          installPhaseCommand = ''
+            wasm-bindgen --target web --out-dir "$out" target/wasm32-unknown-unknown/release/icexiv_effects.wasm
+          '';
+        };
         sdk = build {
           CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
           nativeBuildInputs = [ cli ];
@@ -93,7 +138,9 @@
             mkdir -p $out
             wasm-bindgen --target web --out-dir $out/pkg target/wasm32-unknown-unknown/release/icexiv_renderer.wasm
             cp package.json README.md $out/
-            cp web/component.js $out/pkg/
+            cp web/component.js web/component.d.ts $out/pkg/
+            mkdir -p $out/pkg/effects
+            cp ${effectSdk}/* web/effect-worker.js $out/pkg/effects/
           '';
         };
         site =
@@ -113,9 +160,9 @@
       {
         packages = {
           default = native;
-          inherit native sdk site;
+          inherit native sdk site action-import;
         };
-        checks = { inherit native sdk site; };
+        checks = { inherit native sdk site action-import; };
         formatter = pkgs.nixfmt;
         devShells.default = craneLib.devShell {
           packages = [

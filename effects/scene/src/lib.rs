@@ -1,0 +1,48 @@
+pub mod model;
+#[cfg(feature = "renderer")]
+pub mod renderer;
+#[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
+pub mod test_support;
+
+pub use model::{
+    BakedColorTableMaps, CharacterAppearanceColors, ColorTableRowColors, MaterialAlphaMode,
+    MaterialCharacterScrollVariant, MaterialDecalColorMode, MaterialDrawDepthMode,
+    MaterialFlowMode, MaterialLightShaftType, MaterialLightingMode, MaterialRenderMode,
+    MaterialShaderFamily, MaterialSkinValueMode, MaterialSubColorMode, MaterialValueMode,
+    ModelBounds, ModelData, ModelMaterial, ModelMaterialCharacterColors,
+    ModelMaterialTextureArrays, ModelMesh, ModelMeshDrawRole, ModelRenderData, ModelShapeInfo,
+    ModelShapeTarget, ModelShapeVertexDelta, ModelSubmeshInfo, ModelTexture, ModelTextureKind,
+    ModelTextureTexelLayout, ModelVertex, PackedModelId, PreparedAlphaSource, PreparedMaterial,
+    PreparedMaterialAlphaPolicy, PreparedMaterialFeatureFlags,
+    PreparedMaterialResourceAvailability, PreparedMaterialRuntimeFallbacks,
+    PreparedMaterialRuntimeInputRequirements, PreparedMaterialUnsupportedInputs,
+    PreparedMaterialUvSources, PreparedMesh, PreparedMeshShapeInfluences, PreparedMeshVisibility,
+    PreparedModel, PreparedModelOptions, PreparedModelRuntimeGeometryRequirements,
+    PreparedRenderPass, PreparedRuntimeFallback, PreparedTextureAddressMode,
+    PreparedTextureArrayResource, PreparedTextureArrayStatus, PreparedTextureBindings,
+    PreparedTextureColorSpace, PreparedTextureFilter, PreparedTextureSampling,
+    PreparedTextureSamplingSet, PreparedTextureScrollSet, PreparedTextureUvSources,
+    PreparedUvSource, WeaponCatalogCounts, WeaponCatalogItem, WeaponCatalogPackage,
+    WeaponMaterialAlphaMode, WeaponMaterialRenderMode, WeaponModelBounds, WeaponModelData,
+    WeaponModelMaterial, WeaponModelMesh, WeaponModelTexture, WeaponModelTextureKind,
+    WeaponModelVertex, WeaponStain, bake_color_table_maps, calculate_model_bounds,
+    is_weapon_equip_slot_category, material_color, material_shader_family,
+    mesh_draw_role_for_category, model_mesh_vertices_with_shape_mask,
+    prepare_material_for_draw_role, prepare_model_for_render,
+    prepare_model_for_render_with_options, prepared_material_feature_flags,
+    prepared_material_resource_availability, prepared_material_runtime_fallbacks,
+    prepared_material_runtime_input_requirements, prepared_material_unsupported_inputs,
+    prepared_material_uv_sources, prepared_model_runtime_geometry_requirements,
+    prepared_texture_bindings, prepared_texture_sampling_for_kind, weapon_material_candidate_paths,
+    weapon_model_candidate_paths, weapon_slot_label,
+};
+
+#[cfg(feature = "renderer")]
+pub use renderer::{
+    GpuVfxQuad, ModelDebugMode, ModelGlassBlendMode, ModelInstance, ModelRenderContext,
+    ModelRenderOptions, ModelRenderer, VfxAuraGpuTexture, VfxAuraTextureUploadError, VfxParticles,
+    VfxTextureCubeMipInput, VfxTextureInput, VfxTextureMipInput, VfxTextureMipRgba16fInput,
+    WeaponRenderOptions, WeaponRenderer, WeaponVfxAuraBindings, WeaponVfxAuraInput,
+    ParticleMaterials, WeaponVfxAuraInstance, WeaponVfxAuraResource, WeaponVfxParticles, WeaponVfxPlayback,
+    prepare_weapon_vfx_aura_inputs,
+};

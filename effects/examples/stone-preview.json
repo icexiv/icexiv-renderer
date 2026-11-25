@@ -1,0 +1,13 @@
+{
+  "units_per_second": 30,
+  "bindings": [
+    {"target":{"origin":1,"kind":0,"id":-1},"position":[0,0,0]},
+    {"target":{"origin":1,"kind":1,"id":-1},"position":[-0.4,0.8,0],"elements":[{"id":5,"position":[-0.4,0.9,0],"basis":[[1,0,0],[0,1,0],[0,0,1]]}]},
+    {"target":{"origin":1,"kind":2,"id":-1},"position":[0.4,0.8,0],"elements":[{"id":5,"position":[0.4,0.9,0],"basis":[[1,0,0],[0,1,0],[0,0,1]]}]},
+    {"target":{"origin":2,"kind":0,"id":-1},"position":[0,0,-1.5]}
+  ],
+  "enabled_tracks": [
+    ["chara/action/battle/magic_cnj_end.tmb",3],
+    ["chara/action/battle/magic_cnj_end.tmb",4]
+  ]
+}

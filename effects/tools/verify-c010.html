@@ -1,0 +1,58 @@
+<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,">
+<canvas width="256" height="256"></canvas><output>Testing…</output>
+<script type="module">
+// Local real-asset acceptance. See action-preview.md for the directory layout.
+const worker=new Worker("./sdk/effects/effect-worker.js",{type:"module"});
+const bytes=async path=>{
+  const r=await fetch(path);if(!r.ok)throw Error(path);return new Uint8Array(await r.arrayBuffer());
+};
+let seq=0, pending=new Map();
+worker.onmessage=({data:m})=>{if(!m.phase){const [ok,fail]=pending.get(m.id);pending.delete(m.id);m.error?fail(Error(m.error)):ok(m.value);}};
+const call=(type,args={},transfer=[])=>new Promise((ok,fail)=>{
+  const id=++seq;pending.set(id,[ok,fail]);worker.postMessage({type,id,...args},transfer);
+});
+const assert=(condition,why)=>{if(!condition)throw Error(why);};
+window.ready=(async()=>{
+  const owner=await(await fetch("manifest.json")).json();
+  const entries=await Promise.all(Object.entries(owner.files).map(async ([p,h])=>[p,await bytes(`objects/${h.slice(0,2)}/${h.slice(2)}`)]));
+  const canvas=document.querySelector("canvas").transferControlToOffscreen(),camera={yaw:.65,pitch:.35,distance:3.2};
+  await call("open",{entries,main:owner.main,canvas,...camera},[canvas]);
+  await call("weaponSkeleton",{entries:entries.filter(([p])=>p.endsWith(".sklb"))});
+  const idle=await(await fetch("idle-motion.json")).json(), src=idle.clips[0];
+  assert(src.name==="cbnm_id0" && src.chain[0].command===4 && src.chain[0].duration===70,"wrong idle import");
+  const preview={units_per_second:30,bindings:[]};
+  const I=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];
+  const motion={sklb:await bytes("actor.sklb"),paps:{cbnm_id0:await bytes("idle.pap"),cbnm_01f_lp0:await bytes("move_a.pap")},bone:"n_buki_r",gapHand:I,grip:I};
+  const frame=dt=>call("frame",{...camera,w:256,h:256,dt,enabled:true,report:true});
+  await call("play-action",{events:idle,preview,entries:[],motion});
+  assert((await frame(0)).clip.name===src.name,"wrong pose at idle birth");
+  // Controlled schedule with the same real clips. Check gap, exact transition,
+  // rejection of a wrongly mapped PAP, and preserving the previous sequence.
+  const cue=(name,start)=>({name,chain:[{...src.chain[0],start,duration:3}]});
+  const events={effects:[],clips:[cue("cbnm_id0",0),cue("cbnm_01f_lp0",6)]};
+  await call("play-action",{events,preview,entries:[],motion});
+  assert((await frame(.1)).clip===null,"missing gap");
+  let rejected=false;
+  try {await call("play-action",{events,preview,entries:[],motion:{...motion,paps:{...motion.paps,cbnm_01f_lp0:motion.paps.cbnm_id0}}});}
+  catch(e){rejected=String(e).includes("C010 name missing");}
+  assert(rejected,"accepted wrong PAP");
+  assert((await frame(.1)).clip.name==="cbnm_01f_lp0","wrong second PAP");
+  assert((await frame(.1)).finished,"clip-only action did not finish");
+  await call("reset");assert((await frame(0)).clip.name==="cbnm_id0","replay did not rewind clips");
+  await call("stop-action");await call("play-action",{events:[],preview,entries:[]});
+  assert((await frame(0)).finished,"legacy C012 manifest failed");
+  if(new URLSearchParams(location.search).has("actor")){
+    const files=await(await fetch("actor/files.json")).json();
+    const actorFiles=await Promise.all(Object.entries(files).map(async ([p,id])=>[p,await bytes(`actor/${id}`)]));
+    await call("setActor",{entries:actorFiles,customize:await bytes("actor/customize.bin"),
+      sklb:motion.sklb,pap:motion.paps.cbnm_id0,record:1,loop:true,bone:motion.bone,grip:I,
+      equipment:[{itemId:7540,modelMain:"65677",equipSlotCategory:4}]});
+    await call("play-action",{events,preview,entries:[],motion:{...motion,target:"actor",gap:"rest"}});
+    assert((await frame(0)).clip.name==="cbnm_id0","actor C010 birth failed");
+    assert((await frame(.1)).clip===null,"actor gap pose failed");
+    assert((await frame(.1)).clip.name==="cbnm_01f_lp0","actor PAP switch failed");
+    await call("stop-action");await call("clearActor");
+  }
+  document.querySelector("output").textContent="Passed";
+})().finally(()=>worker.terminate());
+</script>

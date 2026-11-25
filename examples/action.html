@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>动作与武器特效预览</title>
+<style>
+  body{max-width:54rem;margin:2rem auto;padding:0 1rem;font:1rem/1.5 system-ui}
+  pre{white-space:pre-wrap}button{font:inherit}p{margin-block:.5rem}
+</style>
+<h1>动作与武器特效预览</h1>
+<p id="state" role="status">正在加载…</p>
+<icexiv-equipment-canvas><span slot="playback"><button id="play" disabled>播放动作</button>
+<button id="stop" disabled>停止动作</button> <button id="pause" disabled>暂停场景</button>
+<button id="tick" disabled>前进一帧</button></span></icexiv-equipment-canvas>
+<pre id="notes"></pre>
+<script type="module">
+import "../pkg/component.js";
+const query=new URLSearchParams(location.search), stage=document.querySelector("icexiv-equipment-canvas");
+const notes=document.querySelector("#notes"), state=document.querySelector("#state");
+const play=document.querySelector("#play"),stop=document.querySelector("#stop");
+const pause=document.querySelector("#pause"),tick=document.querySelector("#tick");
+const read=async(url)=>{
+  const r=await fetch(url);if(!r.ok)throw Error(`${r.status} ${r.url}`);return r;
+};
+const manifest=async k=>{
+  const p=query.get(k);if(!p)throw Error(`缺少 ${k} 清单地址，参见 docs/action.md`);
+  return (await read(p)).json();
+};
+const cas=new URL(query.get("objects")??"objects/",location.href);
+const bytes=async(_,h)=>{
+  if(!/^[0-9a-f]{64}$/.test(h))throw Error("无效资源摘要");
+  const b=await (await read(new URL(h.slice(0,2)+"/"+h.slice(2),cas))).arrayBuffer();
+  const actual=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",b)),v=>v.toString(16).padStart(2,"0")).join("");
+  if(actual!==h)throw Error(`资源校验失败：${h}`);return new Uint8Array(b);
+};
+stage.addEventListener("renderwarning",e=>{notes.textContent+=e.detail.join("\n")+"\n";});
+stage.addEventListener("rendererror",e=>{state.textContent=e.detail.message;});
+try{
+  const [owner,action,preview]=await Promise.all(["owner","action","preview"].map(manifest));
+  if(owner.mounts.length)await stage.openEffect(owner,bytes);else await stage.openWeapon(owner,bytes);
+  const actor=query.has("actor")?await manifest("actor"):undefined;
+  if(actor)await stage.setActorBundle(actor,bytes);
+  if(query.has("offhand")){
+    if(!actor)throw Error("副手需要 actor 清单");
+    await stage.setOffhandBundle(await manifest("offhand"),bytes);
+  }
+  let paused=false;
+  pause.disabled=tick.disabled=false;
+  pause.onclick=()=>{paused=!paused;if(paused)stage.pauseScene();else stage.resumeScene();pause.textContent=paused?"继续播放":"暂停场景";};
+  tick.onclick=async()=>{paused=true;pause.textContent="继续播放";tick.disabled=true;
+    try{await stage.stepScene();}catch(e){state.textContent=e.message;}finally{tick.disabled=false;}};
+  const run=async()=>{
+    play.disabled=true;notes.textContent="";
+    try{
+      const warnings=await stage.playActionBundle(action,preview,bytes,
+        query.get("motion")==="off"?false:actor?{target:"actor",gap:"rest"}:undefined);
+      notes.textContent=warnings.join("\n");
+      state.textContent=`Action ${action.action} · ${action.entry}`;stop.disabled=false;
+    }catch(e){state.textContent=e.message;}finally{play.disabled=false;}
+  };
+  play.onclick=run;stop.onclick=async()=>{await stage.stopAction();stop.disabled=true;};
+  await run();
+}catch(e){state.textContent=e.message;}
+</script></html>
