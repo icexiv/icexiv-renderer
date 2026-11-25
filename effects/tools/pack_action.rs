@@ -59,7 +59,7 @@ impl Bundle<'_> {
 /// Resolve a sheet ID to its TMB and archive the exact resources the preview consumes.
 pub(super) fn run(args: &[String]) -> Result<()> {
     if args.len() < 3 {
-        return Err("expected SQPACK ACTION_ID CAS [logical PAP paths ...]".into());
+        return Err("expected SQPACK (ACTION_ID | --timeline TIMELINE_ID) CAS [--actor RACE] [PAP ...]".into());
     }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -68,26 +68,34 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let mut read = |p: &str| -> Result<Vec<u8>> {
         Ok(rt.block_on(sq.read(p)).map_err(|e| format!("{p}: {e}"))?)
     };
-    let id = args[1].parse()?;
-    let (h, d) = sheet(&mut read, "action", id)?;
-    let actions = Exd::parse(&d, &h)?;
-    let action = actions.row(id)?.ok_or("action not found")?;
-    #[cfg(not(feature = "data-snapshot"))]
-    let row = action.action_timeline_id()?;
-    #[cfg(feature = "data-snapshot")]
-    let row = match action.field(7)? {
-        icexiv_data::excel::Value::Int16(id)
-            if action.subrow_id().is_none()
-                && h.fixed_row_size() == 64
-                && h.columns().len() == 71
-                && h.columns()[7].offset == 32 =>
-        {
-            id
-        }
-        _ => return Err("unsupported Action timeline column".into()),
+    // Emote items reference ActionTimeline rows directly; live actions go
+    // through the Action sheet first.
+    let (id, row, cas_index) = if args[1] == "--timeline" {
+        let row: u32 = args.get(2).ok_or("missing timeline ID")?.parse()?;
+        (None, row, 3)
+    } else {
+        let id: u32 = args[1].parse()?;
+        let (h, d) = sheet(&mut read, "action", id)?;
+        let actions = Exd::parse(&d, &h)?;
+        let action = actions.row(id)?.ok_or("action not found")?;
+        #[cfg(not(feature = "data-snapshot"))]
+        let row = action.action_timeline_id()?;
+        #[cfg(feature = "data-snapshot")]
+        let row = match action.field(7)? {
+            icexiv_data::excel::Value::Int16(id)
+                if action.subrow_id().is_none()
+                    && h.fixed_row_size() == 64
+                    && h.columns().len() == 71
+                    && h.columns()[7].offset == 32 =>
+            {
+                id
+            }
+            _ => return Err("unsupported Action timeline column".into()),
+        };
+        let row = u32::try_from(row)
+            .map_err(|_| format!("Action {id} has no nonnegative timeline ID"))?;
+        (Some(id), row, 2)
     };
-    let row =
-        u32::try_from(row).map_err(|_| format!("Action {id} has no nonnegative timeline ID"))?;
     let (h, d) = sheet(&mut read, "actiontimeline", row)?;
     let table = Exd::parse(&d, &h)?;
     let timeline = table.row(row)?.ok_or("action timeline not found")?;
@@ -123,7 +131,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     )?;
     let clips = clips.unwrap();
     let mut bundle = Bundle {
-        cas: Path::new(&args[2]),
+        cas: Path::new(&args[cas_index]),
         files: BTreeMap::new(),
         size: 0,
     };
@@ -142,7 +150,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         }
     }
     let mut paps = BTreeMap::new();
-    let mut packages = args[3..].to_vec();
+    let mut packages = args[cas_index + 1..].to_vec();
     let mut sklb = None;
     let probe = packages.first().is_some_and(|a| a == "--actor");
     let mut discovery = false;
