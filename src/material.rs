@@ -99,12 +99,14 @@ pub fn base_color_texture(bytes: &[u8]) -> Result<Option<&str>, MaterialError> {
     Ok((!path.is_empty()).then_some(path))
 }
 
-/// Legacy character materials may modulate a diffuse map with indexed table colors.
+/// Character materials may modulate a diffuse map with indexed table colors.
 /// The primary texture remains unchanged for single-texture SDK consumers.
 pub fn diffuse_overlay(bytes: &[u8]) -> Result<Option<&str>, MaterialError> {
     let m = Mtrl::parse(bytes)?;
-    if m.shader_package()? == b"characterlegacy.shpk"
-        && matches!(source(&m, false), Ok((Source::Index, _)))
+    if matches!(
+        m.shader_package()?,
+        b"character.shpk" | b"characterlegacy.shpk"
+    ) && matches!(source(&m, false), Ok((Source::Index, _)))
     {
         for i in 0..m.sampler_count() {
             let s = m.sampler(i)?;
