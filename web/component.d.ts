@@ -78,6 +78,7 @@ export class EquipmentCanvas extends HTMLElement {
   setOffhandBundle(manifest: WeaponManifest, read?: ResourceReader, options?: {grip?: Matrix}): Promise<void>;
   clearOffhand(): Promise<void>;
   setOwnerVisible(visible: boolean): Promise<void>;
+  setZoom(zoom: number): void;
   setOffhandVisible(visible: boolean): Promise<void>;
   offhandDiagnostics(): Promise<string[]>;
   followWeaponHand(sklb: Uint8Array, pap: Uint8Array, options?: ClipOptions & {

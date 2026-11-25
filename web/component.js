@@ -211,6 +211,8 @@ export class EquipmentCanvas extends HTMLElement {
   async clearOffhand(){ await this.#send("clear-offhand");this.#offhandHasMount=false;this.frame(); }
   /** Keep the prepared owner rig for actor grip and actions without drawing the weapon. */
   async setOwnerVisible(visible){ await this.#send("owner-visible",{visible:!!visible}); this.frame(); }
+  /** Set the orbit zoom shown by the tool bar; range matches the view controls. */
+  setZoom(zoom){ this.#zoom=Math.min(1.8,Math.max(.65,Number(zoom)||1)); this.frame(); }
   async setOffhandVisible(visible){ await this.#send("offhand-visible",{visible:!!visible}); this.frame(); }
   triggerOffhand(scheduler, trigger){ return this.#send("offhand-trigger",{scheduler,trigger}); }
   offhandDiagnostics(){ return this.#send("offhand-diagnostics"); }
