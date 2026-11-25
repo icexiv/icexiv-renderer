@@ -8,11 +8,12 @@ publish = false
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-icexiv-data = { git = "https://github.com/icexiv/icexiv-data.git", rev = "919ffe3c9b0b4f64337a2bf12ebc94c5bffa6fa6" }
+icexiv-data = { git = "https://github.com/icexiv/icexiv-data.git", rev = "c365a807a6bcf48b2696823d2145acce26500074" }
 wgpu = "29.0.3"
 glam = "0.30"
 bytemuck = { version = "1", features = ["derive"] }
 thiserror = "2"
+self_cell = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "=0.2.129"

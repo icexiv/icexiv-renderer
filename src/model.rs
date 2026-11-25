@@ -17,6 +17,9 @@ pub struct EquipmentModel {
     pub(crate) indices: Vec<u32>,
     pub(crate) parts: Vec<(usize, std::ops::Range<u32>)>,
     pub(crate) names: Vec<String>,
+    pub(crate) meshes: Vec<usize>,
+    pub(crate) center: Vec3,
+    pub(crate) radius: f32,
 }
 
 impl EquipmentModel {
@@ -26,6 +29,7 @@ impl EquipmentModel {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         let mut parts = Vec::new();
+        let mut meshes = Vec::new();
         let names = (0..mdl.material_count())
             .map(|i| {
                 std::str::from_utf8(mdl.material(i)?)
@@ -110,6 +114,7 @@ impl EquipmentModel {
                     active_names.len() - 1
                 });
                 parts.push((active, first..indices.len() as u32));
+                meshes.push(mesh);
             }
         }
         if indices.is_empty() {
@@ -133,6 +138,9 @@ impl EquipmentModel {
             indices,
             parts,
             names: active_names,
+            meshes,
+            center,
+            radius,
         })
     }
 

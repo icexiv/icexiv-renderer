@@ -2,29 +2,50 @@
 <html lang="zh-CN"><meta charset="utf-8"><title>装备模型预览</title>
 <style>body{max-width:48rem;margin:2rem auto;font:1rem system-ui}canvas{display:block;width:100%;height:auto;background:#252a30;touch-action:none}output{display:block;margin:.75rem 0}</style>
 <h1>装备模型预览</h1>
-<label>选择一个 MDL，可同时选择配套的 MTRL 和 TEX <input type="file" multiple accept=".mdl,.mtrl,.tex" disabled></label>
+<label>选择一个 MDL；可同时选择材质（MTRL、TEX）和动作（SKLB、PAP）。
+<input type="file" multiple accept=".mdl,.mtrl,.tex,.sklb,.pap" disabled></label>
 <output>正在初始化 WebGPU…</output>
-<icexiv-equipment-canvas></icexiv-equipment-canvas>
+<icexiv-equipment-canvas><span slot="playback" hidden id="motion">
+  <label>动作 <select></select></label> <button id="play">播放</button> <button id="pause">暂停</button>
+  <label>定位（秒）<input id="time" type="number" min="0" step="0.1" value="0"></label>
+</span></icexiv-equipment-canvas>
 <script type="module">
 import "../pkg/component.js";
-import {baseColorTexture, diffuseOverlay} from "../pkg/icexiv_renderer.js";
+import {animationRecords,baseColorTexture, diffuseOverlay} from "../pkg/icexiv_renderer.js";
 const stage = document.querySelector("icexiv-equipment-canvas"), input = document.querySelector("input");
 const status = document.querySelector("output");
+const controls=document.querySelector("#motion"), record=controls.querySelector("select"), time=document.querySelector("#time");
+document.querySelector("#play").onclick=()=>stage.playAnimation();
+document.querySelector("#pause").onclick=()=>stage.pauseAnimation();
+time.onchange=()=>{stage.pauseAnimation();stage.seekAnimation(time.valueAsNumber || 0);};
 try {
   const viewer = await stage.open();
   input.disabled = false;
   status.textContent = "文件只在本机读取。";
-  input.onchange = async () => {
+  const load = async (newFiles) => {
     const files = Array.from(input.files);
     if (!files.length) return;
     input.disabled = true;
+    record.disabled=true;
+    stage.pauseAnimation();
     try {
       const models = files.filter(f => f.name.endsWith(".mdl"));
       if(models.length !== 1) throw Error("请选择一个 MDL");
       const file = models[0], byName = new Map(files.map(f => [f.name,f]));
       if(byName.size !== files.length) throw Error("文件名重复，请只选择同一材质变体的资源");
       const read = async f => new Uint8Array(await f.arrayBuffer());
-      viewer.setModel(await read(file));
+      const sk = files.filter(f=>f.name.endsWith(".sklb")), pap = files.filter(f=>f.name.endsWith(".pap"));
+      if(sk.length!==pap.length || sk.length>1)throw Error("动作预览需要一份匹配的 SKLB 和一份 PAP");
+      controls.hidden=!sk.length;
+      if(sk.length){
+        const bytes=await read(pap[0]);
+        if(newFiles){
+          const options=animationRecords(bytes).map((name,i)=>new Option(`${i} · ${name}`,String(i)));
+          record.replaceChildren(...options);
+        }
+        time.max=stage.setAnimatedModel(await read(file),await read(sk[0]),bytes,Number(record.value));
+        time.value=0;
+      }else viewer.setModel(await read(file));
       const notes = [];
       for(const [slot,name] of viewer.materialNames().entries()){
         const material = byName.get(name.split("/").pop());
@@ -41,9 +62,12 @@ try {
         } catch(e){notes.push(`${name}: ${e.message}`);}
       }
       stage.show();
+      if(sk.length)stage.playAnimation();
       status.textContent = `${file.name} · 拖动旋转${notes.length ? " · 中性材质：" + notes.join("；") : ""}`;
     } catch (e) { status.textContent = e.message; }
-    finally { input.disabled = false; }
+    finally { input.disabled = record.disabled = false; }
   };
+  input.onchange=()=>load(true);
+  record.onchange=()=>load(false);
 } catch (e) { status.textContent = e.message; }
 </script></html>

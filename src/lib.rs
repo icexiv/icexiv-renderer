@@ -1,4 +1,6 @@
-//! FFXIV static equipment preview. Input is a logical MDL extracted from SqPack.
+//! FFXIV equipment preview from logical assets extracted from SqPack.
+mod animation;
+pub use animation::{AnimatedEquipment, AnimationError, PapPose};
 mod material;
 mod model;
 mod paths;

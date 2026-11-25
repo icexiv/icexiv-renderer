@@ -2,7 +2,19 @@ use crate::EquipmentModel;
 use glam::{Mat4, Vec3};
 use wgpu::{self as w, util::DeviceExt};
 
+fn update_centers(centers: &mut [Vec3], anim: &crate::AnimatedEquipment) {
+    for (center, (_, range)) in centers.iter_mut().zip(&anim.model.parts) {
+        let indices = &anim.model.indices[range.start as usize..range.end as usize];
+        *center = indices
+            .iter()
+            .map(|&i| Vec3::from_slice(&anim.vertices[i as usize]))
+            .sum::<Vec3>()
+            / indices.len() as f32;
+    }
+}
+
 pub struct GpuModel {
+    animation: Option<crate::AnimatedEquipment>,
     vertices: w::Buffer,
     indices: w::Buffer,
     parts: Vec<(usize, std::ops::Range<u32>)>,
@@ -13,6 +25,9 @@ pub struct GpuModel {
     centers: Vec<Vec3>,
 }
 impl GpuModel {
+    pub fn pose(&self) -> Option<&crate::PapPose> {
+        self.animation.as_ref().map(|a| a.pose())
+    }
     pub fn material_names(&self) -> &[String] {
         &self.names
     }
@@ -175,10 +190,11 @@ impl Renderer {
             srgb: false,
         });
         GpuModel {
+            animation: None,
             vertices: buffer(
                 "equipment vertices",
                 bytemuck::cast_slice(&model.vertices),
-                w::BufferUsages::VERTEX,
+                w::BufferUsages::VERTEX | w::BufferUsages::COPY_DST,
             ),
             indices: buffer(
                 "indices",
@@ -203,6 +219,38 @@ impl Renderer {
                 })
                 .collect(),
         }
+    }
+
+    pub fn upload_animated(&self, animation: crate::AnimatedEquipment) -> GpuModel {
+        let mut model = self.upload(&animation.model);
+        self.write_pose(&model.vertices, &mut model.centers, &animation);
+        model.animation = Some(animation);
+        model
+    }
+
+    pub fn seek_animation(
+        &self,
+        model: &mut GpuModel,
+        seconds: f64,
+    ) -> Result<(), crate::AnimationError> {
+        let anim = model
+            .animation
+            .as_mut()
+            .ok_or(crate::AnimationError::Binding("no animation loaded"))?;
+        anim.sample(seconds)?;
+        self.write_pose(&model.vertices, &mut model.centers, anim);
+        Ok(())
+    }
+
+    fn write_pose(
+        &self,
+        buffer: &w::Buffer,
+        centers: &mut [Vec3],
+        anim: &crate::AnimatedEquipment,
+    ) {
+        self.queue
+            .write_buffer(buffer, 0, bytemuck::cast_slice(&anim.vertices));
+        update_centers(centers, anim);
     }
 
     fn material_group(&self, mut pixels: crate::material::Pixels) -> w::BindGroup {

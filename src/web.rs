@@ -7,6 +7,105 @@ fn error(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
 
+/// A standalone pose sampler; no DOM, canvas or GPU device is required.
+#[wasm_bindgen]
+pub struct SkeletonClip(crate::PapPose);
+
+/// Names in PAP record order, including additive records. The index can be
+/// passed directly to SkeletonClip.load, loadLayered or setAnimatedModel.
+#[wasm_bindgen(js_name = animationRecords)]
+pub fn animation_records(bytes: &[u8]) -> Result<Vec<String>, JsError> {
+    let pap = crate::animation::parse_pap(bytes).map_err(error)?;
+    Ok(pap
+        .records()
+        .map(|r| String::from_utf8_lossy(r.name).into_owned())
+        .collect())
+}
+
+#[wasm_bindgen]
+impl SkeletonClip {
+    #[wasm_bindgen(js_name = loadNamed)]
+    pub fn load_named(sklb: &[u8], pap: Vec<u8>, name: &str) -> Result<SkeletonClip, JsError> {
+        crate::PapPose::named(sklb, pap, name.as_bytes())
+            .map(Self)
+            .map_err(error)
+    }
+    pub fn load(sklb: &[u8], pap: Vec<u8>, record: usize) -> Result<SkeletonClip, JsError> {
+        crate::PapPose::new(sklb, pap, record)
+            .map(Self)
+            .map_err(error)
+    }
+
+    /// Normal base plus one additive record, both driven by boneWorld's seconds.
+    #[wasm_bindgen(js_name = loadLayered)]
+    pub fn load_layered(
+        sklb: &[u8],
+        base: Vec<u8>,
+        record: usize,
+        overlay: Vec<u8>,
+        overlay_record: usize,
+        weight: f32,
+    ) -> Result<SkeletonClip, JsError> {
+        crate::PapPose::with_additive(sklb, base, record, overlay, overlay_record, weight)
+            .map(Self)
+            .map_err(error)
+    }
+
+    #[wasm_bindgen(js_name = durationSeconds)]
+    pub fn duration_seconds(&self) -> f64 {
+        self.0.duration_seconds()
+    }
+    /// Evaluate once, mix as needed, then read multiple bones without seeking.
+    pub fn sample(&mut self, seconds: f64) -> Result<(), JsError> {
+        if !(0. ..=self.0.duration_seconds()).contains(&seconds) {
+            return Err(error("time outside clip duration"));
+        }
+        self.0.sample(seconds).map_err(error)
+    }
+    #[wasm_bindgen(js_name=blendCurrent)]
+    pub fn blend_current(
+        &mut self,
+        other: &SkeletonClip,
+        weight: f32,
+        subtree: Option<String>,
+    ) -> Result<(), JsError> {
+        self.0
+            .blend_current(&other.0, weight, subtree.as_deref().map(str::as_bytes))
+            .map_err(error)
+    }
+    #[wasm_bindgen(js_name=currentBoneWorld)]
+    pub fn current_bone_world(&self, name: &str) -> Result<Vec<f32>, JsError> {
+        self.0
+            .bone_world(name.as_bytes())
+            .map(|m| m.to_cols_array().to_vec())
+            .ok_or_else(|| error(format!("unknown bone: {name}")))
+    }
+    #[wasm_bindgen(js_name=currentLocalPose)]
+    pub fn current_local_pose(&self, names: Vec<String>) -> Result<Vec<f32>, JsError> {
+        self.0
+            .local_pose(names.iter().map(String::as_bytes))
+            .map_err(error)
+    }
+    #[wasm_bindgen(js_name = restBoneWorld)]
+    pub fn rest_bone_world(&self, name: &str) -> Result<Vec<f32>, JsError> {
+        self.0
+            .rest_bone_world(name.as_bytes())
+            .map(|m| m.to_cols_array().to_vec())
+            .ok_or_else(|| error(format!("unknown bone: {name}")))
+    }
+    #[wasm_bindgen(js_name = localPose)]
+    pub fn local_pose(&mut self, names: Vec<String>, seconds: f64) -> Result<Vec<f32>, JsError> {
+        self.sample(seconds)?;
+        self.current_local_pose(names)
+    }
+
+    #[wasm_bindgen(js_name = boneWorld)]
+    pub fn bone_world(&mut self, name: &str, seconds: f64) -> Result<Vec<f32>, JsError> {
+        self.sample(seconds)?;
+        self.current_bone_world(name)
+    }
+}
+
 #[wasm_bindgen]
 pub struct EquipmentViewer {
     canvas: HtmlCanvasElement,
@@ -113,6 +212,34 @@ impl EquipmentViewer {
         let model = EquipmentModel::from_mdl(mdl).map_err(error)?;
         self.model = Some(self.renderer.upload(&model));
         Ok(())
+    }
+
+    /// Replace the model and initialize it at the selected PAP record's first frame.
+    #[wasm_bindgen(js_name = setAnimatedModel)]
+    pub fn set_animated_model(
+        &mut self,
+        mdl: &[u8],
+        sklb: &[u8],
+        pap: Vec<u8>,
+        record: usize,
+    ) -> Result<f64, JsError> {
+        let pose = crate::PapPose::new(sklb, pap, record).map_err(error)?;
+        let duration = pose.duration_seconds();
+        let animation = crate::AnimatedEquipment::new(mdl, pose).map_err(error)?;
+        self.model = Some(self.renderer.upload_animated(animation));
+        Ok(duration)
+    }
+
+    #[wasm_bindgen(js_name = seekAnimation)]
+    pub fn seek_animation(&mut self, seconds: f64) -> Result<(), JsError> {
+        self.renderer
+            .seek_animation(
+                self.model
+                    .as_mut()
+                    .ok_or_else(|| error("no model loaded"))?,
+                seconds,
+            )
+            .map_err(error)
     }
 
     /// RGB components are sRGB bytes, like a CSS hex color.
