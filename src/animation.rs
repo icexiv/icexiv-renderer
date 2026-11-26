@@ -183,14 +183,15 @@ impl PapPose {
                 let mut used = vec![false; n];
                 let mut tracks = Vec::with_capacity(map.len());
                 for &target in map {
-                    if target == -1 {
+                    if target < 0 {
                         tracks.push(None);
                         continue;
                     }
                     let i = target as usize;
-                    let used = used
-                        .get_mut(i)
-                        .ok_or(Binding("track outside selected skeleton"))?;
+                    let Some(used) = used.get_mut(i) else {
+                        tracks.push(None);
+                        continue;
+                    };
                     if std::mem::replace(used, true) {
                         return Err(Binding("duplicate track destination"));
                     }
@@ -376,6 +377,76 @@ impl PapPose {
         }
         Ok(trs)
     }
+
+    /// Retarget the current pose onto a target skeleton whose bone names and
+    /// rest parent-local transforms (`T3, Q4, S3` per bone) are supplied in
+    /// matching order.
+    ///
+    /// When the target skeleton matches this clip's skeleton, the output is
+    /// identical to `local_pose`. Across different races (e.g. a `c0101` emote
+    /// played on `c1401` or `c1101`), each bone preserves the target's rest
+    /// translation and adds only the clip's translation delta relative to its
+    /// source bind pose, scaled by the `n_hara` hip-height ratio. Bones absent
+    /// from the source skeleton keep their target rest transform.
+    pub fn retargeted_local_pose<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a [u8]>,
+        target_rest: &[f32],
+    ) -> Result<Vec<f32>, AnimationError> {
+        let names: Vec<&'a [u8]> = names.into_iter().collect();
+        retarget_local_samples(
+            &self.bones,
+            &self.local_bind,
+            &self.locals,
+            &names,
+            target_rest,
+        )
+    }
+}
+
+fn retarget_local_samples(
+    bones: &HashMap<Vec<u8>, usize>,
+    local_bind: &[havok::Sample],
+    locals: &[havok::Sample],
+    names: &[&[u8]],
+    target_rest: &[f32],
+) -> Result<Vec<f32>, AnimationError> {
+    if target_rest.len() != names.len() * 10 {
+        return Err(Binding("retarget rest pose length mismatch"));
+    }
+    let root_scale = bones
+        .get(b"n_hara".as_slice())
+        .and_then(|&src| {
+            let dst = names.iter().position(|&n| n == b"n_hara")?;
+            let src_h = Vec3::from(local_bind[src].translation).length();
+            let dst_h = Vec3::from_slice(&target_rest[dst * 10..dst * 10 + 3]).length();
+            (src_h > 1e-4 && dst_h > 1e-4).then_some(dst_h / src_h)
+        })
+        .unwrap_or(1.);
+    let mut trs = Vec::with_capacity(target_rest.len());
+    for (idx, name) in names.iter().enumerate() {
+        let rest = &target_rest[idx * 10..(idx + 1) * 10];
+        let Some(&src) = bones.get(*name) else {
+            trs.extend_from_slice(rest);
+            continue;
+        };
+        let bind = &local_bind[src];
+        let cur = &locals[src];
+        let delta_t = Vec3::from(cur.translation) - Vec3::from(bind.translation);
+        let t = Vec3::from_slice(&rest[..3]) + delta_t * root_scale;
+        let mut s = [0f32; 3];
+        for k in 0..3 {
+            s[k] = if bind.scale[k].abs() > f32::EPSILON {
+                rest[7 + k] * (cur.scale[k] / bind.scale[k])
+            } else {
+                cur.scale[k]
+            };
+        }
+        trs.extend(t.to_array());
+        trs.extend(cur.rotation);
+        trs.extend(s);
+    }
+    Ok(trs)
 }
 
 fn blend_local(a: havok::Sample, b: havok::Sample, t: f32) -> havok::Sample {
@@ -540,6 +611,78 @@ fn skin_vertex(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn retarget_samples(
+        source_bones: &[(&[u8], havok::Sample, havok::Sample)],
+        target_names: &[&[u8]],
+        target_rest: &[f32],
+    ) -> Result<Vec<f32>, AnimationError> {
+        let mut bones = HashMap::new();
+        let mut local_bind = Vec::new();
+        let mut locals = Vec::new();
+        for (i, &(name, bind, cur)) in source_bones.iter().enumerate() {
+            bones.insert(name.to_vec(), i);
+            local_bind.push(bind);
+            locals.push(cur);
+        }
+        retarget_local_samples(&bones, &local_bind, &locals, target_names, target_rest)
+    }
+
+    #[test]
+    fn retarget_preserves_target_bone_lengths_and_scales_deltas_by_hip_height() {
+        let q_id = Quat::IDENTITY.to_array();
+        let q_rot = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4).to_array();
+        let src_hara_bind = havok::Sample {
+            translation: [0., 1.0, 0.],
+            rotation: q_id,
+            scale: [1.; 3],
+        };
+        let src_hara_cur = havok::Sample {
+            translation: [0., 0.8, 0.2], // crouched -0.2, forward +0.2
+            rotation: q_rot,
+            scale: [1.; 3],
+        };
+        let src_neck_bind = havok::Sample {
+            translation: [0.15, 0., 0.], // tall race neck
+            rotation: q_id,
+            scale: [1.; 3],
+        };
+        let src_neck_cur = havok::Sample {
+            translation: [0.15, 0., 0.], // untranslated
+            rotation: q_rot,
+            scale: [1.; 3],
+        };
+        // Target is half hip height (0.5 vs 1.0), shorter neck (0.08), plus an extra tail bone.
+        let mut target_rest = Vec::new();
+        target_rest.extend([0., 0.5, 0.]);
+        target_rest.extend(q_id);
+        target_rest.extend([1., 1., 1.]);
+        target_rest.extend([0.08, 0., 0.]);
+        target_rest.extend(q_id);
+        target_rest.extend([1., 1., 1.]);
+        target_rest.extend([0., -0.1, -0.2]);
+        target_rest.extend(q_id);
+        target_rest.extend([1., 1., 1.]);
+
+        let out = retarget_samples(
+            &[
+                (b"n_hara", src_hara_bind, src_hara_cur),
+                (b"j_kubi", src_neck_bind, src_neck_cur),
+            ],
+            &[b"n_hara", b"j_kubi", b"j_sippo_a"],
+            &target_rest,
+        )
+        .unwrap();
+
+        // n_hara: 0.5 + (-0.2) * 0.5 = 0.4, z: 0 + 0.2 * 0.5 = 0.1
+        assert!(Vec3::from_slice(&out[0..3]).abs_diff_eq(Vec3::new(0., 0.4, 0.1), 1e-6));
+        assert_eq!(&out[3..7], &q_rot);
+        // j_kubi: stays at target neck length 0.08, not stretched to 0.15
+        assert!(Vec3::from_slice(&out[10..13]).abs_diff_eq(Vec3::new(0.08, 0., 0.), 1e-6));
+        assert_eq!(&out[13..17], &q_rot);
+        // j_sippo_a: absent from source, keeps target rest transform
+        assert_eq!(&out[20..30], &target_rest[20..30]);
+    }
 
     #[test]
     fn additive_interpolates_after_composition_in_joint_local_space() {

@@ -74,6 +74,19 @@ pub struct ActorAssets {
     partials: Vec<PartialRig>,
 }
 
+#[inline(never)]
+fn appearance_from_resource<R: physis::resource::Resource>(
+    source: &mut R,
+    customize: &assets::CharacterCustomize,
+) -> Option<assets::CharacterAppearanceColors> {
+    let bytes = source.read("chara/xls/charamake/human.cmp").ok()?;
+    let cmp =
+        <physis::cmp::CMP as physis::ReadableFile>::from_existing(physis::Platform::Win32, &bytes)
+            .ok()?;
+    let palette = assets::character_palette_from_cmp(&cmp);
+    Some(assets::appearance_colors_from_palette(customize, &palette))
+}
+
 impl ActorAssets {
     pub fn load<R: physis::resource::Resource>(
         source: &mut R,
@@ -88,6 +101,15 @@ impl ActorAssets {
                 piece.equip_slot_category
             );
         }
+        let resolved;
+        let request = if request.appearance.is_none()
+            && let Some(appearance) = appearance_from_resource(source, &request.customize)
+        {
+            resolved = request.clone().with_appearance(appearance);
+            &resolved
+        } else {
+            request
+        };
         let (mut data, skeleton) =
             assets::load_dressed_character_with_skeleton_from_resource(source, request)?;
         for piece in &request.equipment {

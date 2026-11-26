@@ -86,6 +86,16 @@ impl SkeletonClip {
             .local_pose(names.iter().map(String::as_bytes))
             .map_err(error)
     }
+    #[wasm_bindgen(js_name=currentRetargetedLocalPose)]
+    pub fn current_retargeted_local_pose(
+        &self,
+        names: Vec<String>,
+        target_rest: &[f32],
+    ) -> Result<Vec<f32>, JsError> {
+        self.0
+            .retargeted_local_pose(names.iter().map(String::as_bytes), target_rest)
+            .map_err(error)
+    }
     #[wasm_bindgen(js_name = restBoneWorld)]
     pub fn rest_bone_world(&self, name: &str) -> Result<Vec<f32>, JsError> {
         self.0
@@ -97,6 +107,16 @@ impl SkeletonClip {
     pub fn local_pose(&mut self, names: Vec<String>, seconds: f64) -> Result<Vec<f32>, JsError> {
         self.sample(seconds)?;
         self.current_local_pose(names)
+    }
+    #[wasm_bindgen(js_name = retargetedLocalPose)]
+    pub fn retargeted_local_pose(
+        &mut self,
+        names: Vec<String>,
+        target_rest: &[f32],
+        seconds: f64,
+    ) -> Result<Vec<f32>, JsError> {
+        self.sample(seconds)?;
+        self.current_retargeted_local_pose(names, target_rest)
     }
 
     #[wasm_bindgen(js_name = boneWorld)]

@@ -20,9 +20,10 @@ async function prepareSequence(clips, previewJson, options) {
   const actor = options.target==="actor";
   if(options.target!==undefined && !actor && options.target!=="hand")throw Error("Unknown C010 pose target");
   const names=actor?viewer.actor_bone_names():undefined;
-  const gapLocals=actor&&(options.gap==="rest"||options.gapLocals===undefined)?viewer.actor_rest_locals():options.gapLocals;
+  const restLocals=actor?viewer.actor_rest_locals():undefined;
+  const gapLocals=actor&&(options.gap==="rest"||options.gapLocals===undefined)?restLocals:options.gapLocals;
   const matrix = (m) => m?.length===16 && Array.from(m).every(Number.isFinite);
-  if (actor && (!names.length || gapLocals?.length!==names.length*10)) throw Error("Actor C010 requires an attached actor and gapLocals or gap:'rest'");
+  if (actor && (!names.length || restLocals?.length!==names.length*10 || gapLocals?.length!==names.length*10)) throw Error("Actor C010 requires an attached actor and gapLocals or gap:'rest'");
   if (!actor && (!bone || (gapHand!==undefined&&!matrix(gapHand)) || !matrix(grip))) throw Error("Invalid C010 bone, gapHand or grip");
   const module = await import("../icexiv_renderer.js");
   await module.default();
@@ -37,7 +38,7 @@ async function prepareSequence(clips, previewJson, options) {
       if (decoded.size>=64 || bytes>128*1024*1024) throw Error("C010 clip resource budget exceeded");
       const c = module.SkeletonClip.loadNamed(sklb, paps[name], name);
       decoded.set(key,c);
-      if(actor)c.localPose(names,0);else c.boneWorld(bone,0);
+      if(actor)c.retargetedLocalPose(names,restLocals,0);else c.boneWorld(bone,0);
     };
     for (const [i,w] of windows.entries()) {
       load(w.name,w.name);
@@ -60,7 +61,7 @@ async function prepareSequence(clips, previewJson, options) {
         incoming.sample(Math.min(t-next.start,incoming.durationSeconds()));
         c.blendCurrent(incoming,(t-next.start)/(w.end-next.start));
       }
-      return actor?c.currentLocalPose(names):c.currentBoneWorld(bone);
+      return actor?c.currentRetargetedLocalPose(names,restLocals):c.currentBoneWorld(bone);
     };
     return {warnings, free, sample, grip, actor, windowAt, end:windows.at(-1).end};
   } catch(e) {free();throw e;}
@@ -165,8 +166,8 @@ async function dispatch(m) {
         let actor;
         try {
           actor=DressedActor.load(bundle(m.entries),m.customize,JSON.stringify(m.equipment));
-          const names=actor.bone_names(), duration=c.durationSeconds();
-          const sample=t=>c.localPose(names,m.loop&&duration>0?t%duration:Math.min(t,duration));
+          const names=actor.bone_names(), restLocals=actor.rest_locals(), duration=c.durationSeconds();
+          const sample=t=>c.retargetedLocalPose(names,restLocals,m.loop&&duration>0?t%duration:Math.min(t,duration));
           const owned=actor;
           actor=undefined;
           viewer.set_actor(owned,m.bone,m.grip,sample);

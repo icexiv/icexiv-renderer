@@ -73,6 +73,14 @@ impl DressedActor {
     pub fn bone_names(&self) -> Vec<String> {
         self.0.skeleton.bone_names.clone()
     }
+    pub fn rest_locals(&self) -> Vec<f32> {
+        self.0
+            .skeleton
+            .rest_pose
+            .iter()
+            .flat_map(|b| b.translation.into_iter().chain(b.rotation).chain(b.scale))
+            .collect()
+    }
 }
 
 fn actor_locals(
