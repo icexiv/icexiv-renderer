@@ -234,6 +234,7 @@ impl EffectPlayer {
                     ("_met.mdl", (*head_id).max(1), (*head_variant).max(1)),
                     ("_top.mdl", (*body_id).max(1), (*body_variant).max(1)),
                     ("_sho.mdl", (*feet_id).max(1), (*feet_variant).max(1)),
+                    ("_dwn.mdl", 1, 1),
                 ];
                 for (suffix, base_id, variant_id) in slots {
                     let req = CharaModelLoadRequest {
