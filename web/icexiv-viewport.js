@@ -210,6 +210,14 @@ export class IcexivViewport extends HTMLElement {
     this.frame();
   }
 
+  /** Attach a 3D prop or weapon directly to an actor bone (e.g. "n_buki_r" for try-on). */
+  async addProp(propId, modelMain, bone, files, read) {
+    if (!this.#worker) throw Error("场景尚未打开");
+    const entries = await this.#entries(Object.entries(files ?? {}), this.#epoch, "model-files", read);
+    await this.#send("addProp", { propId, main: String(modelMain), bone: bone || "n_buki_r", grip: IDENTITY, entries });
+    this.frame();
+  }
+
   async playActionBundle(bundle, preview, read) {
     if (!this.#worker) throw Error("场景尚未打开");
     const epoch = this.#epoch;
