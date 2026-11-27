@@ -12,6 +12,7 @@ pub mod offhand;
 mod particles;
 mod pose;
 pub mod prop;
+pub mod standalone;
 pub mod timeline;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -167,6 +168,7 @@ pub struct EffectPlayer {
     offhand: Option<offhand::Offhand>,
     actor: Option<actor::Actor>,
     props: Vec<prop::Prop>,
+    standalone: Vec<scene::ModelInstance>,
     action: Option<(timeline::ActionPlayer, u64)>,
     renderer: ModelRenderer,
     pose: Option<pose::OwnerPose>,
@@ -266,6 +268,7 @@ impl EffectPlayer {
             actor: None,
             offhand: None,
             props: Vec::new(),
+            standalone: Vec::new(),
             action: None,
             renderer,
             pose: pose::OwnerPose::new(&mounts),
@@ -429,6 +432,7 @@ impl EffectPlayer {
                 player.actor.as_ref(),
                 player.offhand.as_ref(),
                 &player.props,
+                &player.standalone,
                 player.owner_visible,
             );
             let cam =
@@ -507,6 +511,7 @@ impl EffectPlayer {
             self.actor.as_ref(),
             self.offhand.as_ref(),
             &self.props,
+            &self.standalone,
             self.owner_visible,
         );
         let mut batches = Vec::with_capacity(3);
@@ -535,12 +540,14 @@ fn scene_models<'a>(
     actor: Option<&'a actor::Actor>,
     offhand: Option<&'a offhand::Offhand>,
     props: &'a [prop::Prop],
+    standalone: &'a [scene::ModelInstance],
     owner_visible: bool,
 ) -> Vec<&'a scene::ModelInstance> {
     weapon_instances(weapon, owner_visible)
         .chain(actor.map(|a| &a.mesh))
         .chain(offhand.map(|o| &o.mesh))
         .chain(props.iter().filter(|p| p.visible).map(|p| &p.mesh))
+        .chain(standalone.iter())
         .collect()
 }
 

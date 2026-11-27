@@ -98,6 +98,12 @@ async function dispatch(m) {
       case "setPan":
         viewer.set_pan(m.x, m.y);
         break;
+      case "setStandalone":
+        viewer.set_standalone(JSON.stringify(m.spec), bundle(m.entries));
+        break;
+      case "clearStandalone":
+        viewer.clear_standalone();
+        break;
       case "addProp":
         viewer.add_prop(m.propId, BigInt(m.main), m.bone, m.grip, bundle(m.entries));
         break;
@@ -202,6 +208,16 @@ async function dispatch(m) {
       }
       case "clearActor":
         clearSequence();viewer.clear_actor();actorClip?.free();actorClip=undefined;break;
+      case "updateActor": {
+        let actor;
+        try {
+          actor = DressedActor.load(bundle(m.entries), m.customize, JSON.stringify(m.equipment));
+          const owned = actor;
+          actor = undefined;
+          viewer.update_actor(owned);
+        } finally { actor?.free(); }
+        break;
+      }
       case "actorPartialRigs": value=viewer.actor_partial_rigs();break;
       case "actorPartialSkeleton": value={names:viewer.actor_partial_names(m.path),rest:viewer.actor_partial_rest(m.path)};break;
       case "setActorPartialPose": viewer.set_actor_partial_pose(m.path,m.locals);break;

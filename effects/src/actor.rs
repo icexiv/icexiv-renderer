@@ -473,6 +473,33 @@ impl EffectPlayer {
         }
         Ok(())
     }
+    /// Hot-swap the actor mesh/equipment/appearance/dyes while preserving placement,
+    /// grip, active action, props, and current pose when the skeleton is unchanged.
+    pub fn update_actor(&mut self, data: ActorAssets) -> Result<()> {
+        let Some(prev) = self.actor.as_ref() else {
+            let rest = SkeletonPose::rest_pose(&data.skeleton);
+            return self.install_actor(data, "n_buki_r", Mat4::IDENTITY.to_cols_array(), &rest);
+        };
+        let hand_name = prev
+            .skeleton
+            .bone_names
+            .get(prev.hand)
+            .cloned()
+            .unwrap_or_else(|| "n_buki_r".to_string());
+        let grip = prev.grip;
+        let placement = prev.placement;
+        let same_skeleton = data.skeleton.bone_names == prev.skeleton.bone_names;
+        let pose = if same_skeleton {
+            prev.last_pose.clone()
+        } else {
+            SkeletonPose::rest_pose(&data.skeleton)
+        };
+        self.install_actor(data, &hand_name, grip, &pose)?;
+        if let Some(actor) = &mut self.actor {
+            actor.placement = placement;
+        }
+        Ok(())
+    }
     pub fn clear_actor(&mut self) -> Result<()> {
         if self.actor.is_some() {
             if self.pose.is_some() {

@@ -156,17 +156,19 @@ export class IcexivViewport extends HTMLElement {
     this.frame();
   }
 
-  async setActorBundle(manifest, read) {
+  async setActorBundle(manifest, read, overrides = {}) {
     if (!this.#worker) await this.openScene();
     const { files, customize, equipment, sklb, pap, record } = manifest;
-    const entries = await this.#entries(Object.entries(files ?? {}), this.#epoch, "actor-files", read);
+    const mergedFiles = { ...(files ?? {}), ...(overrides.files ?? {}) };
+    const entries = await this.#entries(Object.entries(mergedFiles), this.#epoch, "actor-files", read);
     const byPath = new Map(entries);
+    await this.#send("clearStandalone");
     await this.#send("setActor", {
       entries: entries.filter(([p]) => p !== pap),
-      customize: Uint8Array.from(customize),
+      customize: Uint8Array.from(overrides.customize ?? customize),
       sklb: byPath.get(sklb),
       pap: byPath.get(pap),
-      equipment: equipment ?? [],
+      equipment: overrides.equipment ?? equipment ?? [],
       record: record ?? 0,
       bone: "n_buki_r",
       loop: true,
@@ -174,6 +176,38 @@ export class IcexivViewport extends HTMLElement {
     });
     this.#actorPlaying = true;
     this.#wake();
+  }
+
+  /** Hot-swap actor equipment, 2-channel dyes, hair, face paint, or colors in place. */
+  async updateActorBundle(manifest, read, overrides = {}) {
+    if (!this.#worker) return this.setActorBundle(manifest, read, overrides);
+    const { files, customize, equipment, pap } = manifest;
+    const mergedFiles = { ...(files ?? {}), ...(overrides.files ?? {}) };
+    const entries = await this.#entries(Object.entries(mergedFiles), this.#epoch, "actor-files", read);
+    await this.#send("updateActor", {
+      entries: entries.filter(([p]) => p !== pap),
+      customize: Uint8Array.from(overrides.customize ?? customize),
+      equipment: overrides.equipment ?? equipment ?? [],
+    });
+    this.frame();
+  }
+
+  /** Load a standalone model (equipment, weapon, mount, minion, furniture, or chocobo) in the unified scene. */
+  async setStandalone(spec, files, read) {
+    if (!this.#worker) await this.openScene();
+    const entries = await this.#entries(Object.entries(files ?? {}), this.#epoch, "model-files", read);
+    await this.#send("clearActor");
+    await this.#send("clearProps");
+    this.#actorPlaying = false;
+    this.#actionActive = false;
+    await this.#send("setStandalone", { spec, entries });
+    this.frame();
+  }
+
+  async clearStandalone() {
+    if (!this.#worker) return;
+    await this.#send("clearStandalone");
+    this.frame();
   }
 
   async playActionBundle(bundle, preview, read) {

@@ -279,6 +279,16 @@ impl WeaponEffectViewer {
     pub fn set_pan(&mut self, x: f32, y: f32) -> Result<(), JsError> {
         self.player.set_pan([x, y]).map_err(err)
     }
+    pub fn set_standalone(&mut self, spec_json: &str, files: EffectFiles) -> Result<(), JsError> {
+        let spec: crate::standalone::StandaloneSpec =
+            serde_json::from_str(spec_json).map_err(err)?;
+        self.player
+            .set_standalone(&mut MemoryResource::new(files.files), &spec)
+            .map_err(err)
+    }
+    pub fn clear_standalone(&mut self) {
+        self.player.clear_standalone();
+    }
     pub fn add_prop(
         &mut self,
         id: String,
@@ -434,6 +444,9 @@ impl WeaponEffectViewer {
         self.player.clear_actor().map_err(err)?;
         self.actor_motion = None;
         Ok(())
+    }
+    pub fn update_actor(&mut self, actor: DressedActor) -> Result<(), JsError> {
+        self.player.update_actor(actor.0).map_err(err)
     }
     pub fn actor_partial_rigs(&self) -> Vec<String> {
         self.player.actor_partial_rigs()
