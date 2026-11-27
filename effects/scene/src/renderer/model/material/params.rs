@@ -1089,13 +1089,28 @@ pub(crate) fn alpha_mode_value(mode: MaterialAlphaMode) -> f32 {
     }
 }
 
-/// render.z 编码：hair.shpk 的 Blend 按 Mask（alpha clip）编码——配合数据层
-/// 同规则（hair Blend → Cutout pass），使 WGSL 按 MTRL alpha_threshold 丢弃
-/// 发丝间隙（true blend 会透出头皮鳞片/皮肤纹理，敖龙前额鳞片透出实证）。
+pub(crate) fn render_mode_value_for_pass(
+    material: &ModelMaterial,
+    prepared_material: PreparedMaterial,
+) -> f32 {
+    if matches!(prepared_material.shader_family, MaterialShaderFamily::Skin) {
+        return render_mode_value(MaterialRenderMode::Opaque);
+    }
+    render_mode_value(material.render_mode)
+}
+
+/// render.z 编码：
+/// - skin.shpk 恒为不透明表面（base.a 是唇妆/脸部遮罩而非透明度），按 Opaque 编码。
+/// - hair.shpk 的 Blend 按 Mask（alpha clip）编码——配合数据层同规则
+///   （hair Blend → Cutout pass），使 WGSL 按 MTRL alpha_threshold 丢弃
+///   发丝间隙（true blend 会透出头皮鳞片/皮肤纹理，敖龙前额鳞片透出实证）。
 pub(crate) fn alpha_mode_value_for_pass(
     material: &ModelMaterial,
     prepared_material: PreparedMaterial,
 ) -> f32 {
+    if matches!(prepared_material.shader_family, MaterialShaderFamily::Skin) {
+        return alpha_mode_value(MaterialAlphaMode::Opaque);
+    }
     if matches!(prepared_material.shader_family, MaterialShaderFamily::Hair)
         && matches!(material.alpha_mode, MaterialAlphaMode::Blend)
     {

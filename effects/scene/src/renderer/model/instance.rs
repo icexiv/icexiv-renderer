@@ -50,9 +50,18 @@ pub(crate) fn flatten_model_with_options_and_skeleton<M: ModelRenderData + ?Size
         if prepared_mesh.mesh_hidden {
             continue;
         }
+        let mut prepared_material = prepared_mesh.prepared_material;
+        if matches!(prepared_material.shader_family, MaterialShaderFamily::Skin) {
+            // skin.shpk is always an opaque G-buffer surface: its base-color
+            // alpha channel carries lip/face mask data, not surface opacity.
+            // Routing face skin through the transparent pass disables depth
+            // writes and sorts triangles by bind-pose centroids, causing the
+            // inner mouth/gums/teeth to draw over the lips during animations.
+            prepared_material.render_pass = PreparedRenderPass::Opaque;
+            prepared_material.alpha_policy.source = PreparedAlphaSource::Opaque;
+        }
         if !prepared_mesh.renders_in_main_pass
-            && !prepared_mesh
-                .prepared_material
+            && !prepared_material
                 .render_pass
                 .uses_additive_pipeline()
         {
@@ -86,8 +95,7 @@ pub(crate) fn flatten_model_with_options_and_skeleton<M: ModelRenderData + ?Size
         }));
         let index_start = indices.len() as u32;
         indices.extend(mesh.indices.iter().map(|index| base + *index));
-        let transparent_triangles = if prepared_mesh
-            .prepared_material
+        let transparent_triangles = if prepared_material
             .render_pass
             .sorts_back_to_front()
         {
@@ -111,7 +119,7 @@ pub(crate) fn flatten_model_with_options_and_skeleton<M: ModelRenderData + ?Size
             draw_role: prepared_mesh.draw_role,
             index_start,
             index_count: mesh.indices.len() as u32,
-            prepared_material: prepared_mesh.prepared_material,
+            prepared_material,
             transparent_triangles,
         });
     }

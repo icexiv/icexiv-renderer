@@ -256,7 +256,7 @@ pub(crate) fn create_material_bind_group<M: ModelRenderData + ?Sized>(
             material_legacy_specular_mode(material),
         ],
         render: [
-            render_mode_value(material.render_mode),
+            render_mode_value_for_pass(material, prepared_material),
             material.opacity,
             alpha_mode_value_for_pass(material, prepared_material),
             material.alpha_threshold.clamp(0.0, 1.0),

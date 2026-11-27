@@ -4410,3 +4410,37 @@ fn test_texture(kind: crate::ModelTextureKind) -> crate::ModelTexture {
         rgba_f32: None,
     }
 }
+
+#[test]
+fn skin_face_material_forces_opaque_pass_and_alpha_policy() {
+    let mut material = fallback_material();
+    material.shader_package_name = Some("skin.shpk".to_string());
+    material.skin_value_mode = crate::MaterialSkinValueMode::Face;
+    material.render_mode = MaterialRenderMode::Transparent;
+    material.alpha_mode = MaterialAlphaMode::Blend;
+
+    let model = crate::ModelData {
+        meshes: vec![test_mesh("normal", 0.0)],
+        materials: vec![material.clone()],
+        textures: Vec::new(),
+        bounds: crate::ModelBounds::default(),
+    };
+
+    let (_, _, batches) = flatten_model(&model);
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert_eq!(batch.pass(), PreparedRenderPass::Opaque);
+    assert_eq!(
+        batch.prepared_material.alpha_policy.source,
+        PreparedAlphaSource::Opaque
+    );
+    assert!(batch.transparent_triangles.is_empty());
+    assert_eq!(
+        render_mode_value_for_pass(&material, batch.prepared_material),
+        0.0
+    );
+    assert_eq!(
+        alpha_mode_value_for_pass(&material, batch.prepared_material),
+        0.0
+    );
+}
