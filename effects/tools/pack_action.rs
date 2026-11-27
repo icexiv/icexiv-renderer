@@ -1,4 +1,4 @@
-use super::{Result, walk};
+use super::{Result, Timeline, TimelineLimits, walk, walk_timeline};
 use icexiv_data::{
     avfx::Avfx,
     excel::{Exd, Exh, Language},
@@ -135,20 +135,6 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         files: BTreeMap::new(),
         size: 0,
     };
-    for e in &events {
-        let path = e["avfx"].as_str().ok_or("missing AVFX name")?;
-        if bundle.files.contains_key(path) {
-            continue;
-        }
-        let b = read(path)?;
-        bundle.store(path, &b)?;
-        for t in Avfx::parse(&b)?.textures {
-            let t = std::str::from_utf8(t)?;
-            if !t.is_empty() && !bundle.files.contains_key(t) {
-                bundle.store(t, &read(t)?)?;
-            }
-        }
-    }
     let mut paps = BTreeMap::new();
     let mut packages = args[cas_index + 1..].to_vec();
     let mut sklb = None;
@@ -202,21 +188,39 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             Err(e) => return Err(format!("{path}: {e}").into()),
         };
         let mut matched = false;
-        for r in Pap::parse_with_limits(
+        let parsed = Pap::parse_with_limits(
             &b,
             icexiv_data::havok::Limits {
                 max_values: 8 << 20,
                 ..Default::default()
             },
-        )?
-        .records()
-        {
+        )?;
+        let pap_timelines = Timeline::parse_sequence(parsed.timeline, TimelineLimits::default())?;
+        for (rec_idx, r) in parsed.records().enumerate() {
             let n = std::str::from_utf8(r.name)?;
             if clips.iter().any(|c| c["name"] == n) {
                 if paps.insert(n.to_owned(), path).is_some() {
                     return Err(format!("ambiguous PAP record: {n}").into());
                 }
                 matched = true;
+                if let Some(tl) = pap_timelines.get(rec_idx) {
+                    for clip in clips.iter().filter(|c| c["name"] == n) {
+                        let mut calls = clip["chain"]
+                            .as_array()
+                            .ok_or("invalid C010 chain")?
+                            .clone();
+                        walk_timeline(
+                            &mut read,
+                            tl,
+                            path,
+                            &mut vec![path.clone()],
+                            &mut calls,
+                            &mut events,
+                            &mut None,
+                            &mut 1024,
+                        )?;
+                    }
+                }
             }
         }
         if !matched {
@@ -226,6 +230,20 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             return Err(format!("{path} supplies no requested C010 clip").into());
         }
         bundle.store(path, &b)?;
+    }
+    for e in &events {
+        let path = e["avfx"].as_str().ok_or("missing AVFX name")?;
+        if bundle.files.contains_key(path) {
+            continue;
+        }
+        let b = read(path)?;
+        bundle.store(path, &b)?;
+        for t in Avfx::parse(&b)?.textures {
+            let t = std::str::from_utf8(t)?;
+            if !t.is_empty() && !bundle.files.contains_key(t) {
+                bundle.store(t, &read(t)?)?;
+            }
+        }
     }
     let unresolved: Vec<_> = clips
         .iter()

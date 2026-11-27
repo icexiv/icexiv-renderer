@@ -51,6 +51,21 @@ fn walk(
     let [t] = timelines.as_slice() else {
         return Err("expected one standalone timeline".into());
     };
+    walk_timeline(read, t, path, stack, calls, output, clips, budget)?;
+    stack.pop();
+    Ok(())
+}
+
+fn walk_timeline(
+    read: &mut impl FnMut(&str) -> Result<Vec<u8>>,
+    t: &Timeline<'_>,
+    path: &str,
+    stack: &mut Vec<String>,
+    calls: &mut Vec<Value>,
+    output: &mut Vec<Value>,
+    clips: &mut Option<Vec<Value>>,
+    budget: &mut usize,
+) -> Result<()> {
     for l in t.command_links(4 << 20, 1_000_000)? {
         let Some(r) = t.command_resource(l.command)? else {
             continue;
@@ -92,7 +107,6 @@ fn walk(
         }
         calls.pop();
     }
-    stack.pop();
     Ok(())
 }
 fn main() -> Result<()> {

@@ -224,6 +224,24 @@ impl EffectPlayer {
     /// Publish both equipped hands after posing, before the next C012 input.
     /// Leave explicit point overrides and an absent offhand under host control.
     pub fn refresh_equipped_action_weapons(&mut self) -> Result<()> {
+        let actor_selector = crate::timeline::BindTarget {
+            origin: 1,
+            kind: 0,
+            id: -1,
+        };
+        if let Some(actor) = &self.actor
+            && self
+                .action
+                .as_ref()
+                .is_some_and(|(a, _)| a.has_binding(actor_selector))
+        {
+            let elements = actor.action_elements()?;
+            if !elements.is_empty() {
+                self.action_player_mut()
+                    .context("no active action")?
+                    .set_caster_elements(actor_selector, elements)?;
+            }
+        }
         for kind in [1, 2] {
             let selector = crate::timeline::BindTarget {
                 origin: 1,

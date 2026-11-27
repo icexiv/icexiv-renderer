@@ -172,9 +172,20 @@ fn resolve_surface_output(
         / max(4.0 * normal_view * normal_light, 0.001);
     let diffuse_weight = (vec3<f32>(1.0) - fresnel) * (1.0 - metalness);
     let specular_mask = clamp(resolve_specular_mask_factor(surface.mask.r), 0.0, 1.35);
+    let is_skin = material.character_skin.a > 0.5;
+    let sss_strength = select(0.0, clamp(surface.mask.b, 0.0, 1.0), is_skin);
+    let skin_wrap = 0.45 * sss_strength;
+    let ndl = dot(normal, light);
+    let wrapped_ndl = clamp((ndl + skin_wrap) / (1.0 + skin_wrap), 0.0, 1.0);
+    let scatter = max(wrapped_ndl - normal_light, 0.0) * vec3<f32>(1.0, 0.52, 0.38);
+    let diffuse_term = select(
+        vec3<f32>(normal_light),
+        vec3<f32>(wrapped_ndl) + scatter * 0.45,
+        is_skin,
+    );
     let direct_diffuse = diffuse_weight
         * surface.base
-        * (normal_light * PREVIEW_DIRECT_DIFFUSE_SCALE / 3.14159265)
+        * (diffuse_term * PREVIEW_DIRECT_DIFFUSE_SCALE / 3.14159265)
         * PREVIEW_KEY_COLOR;
     let ggx_direct_specular = specular_brdf
         * normal_light
@@ -200,7 +211,7 @@ fn resolve_surface_output(
     let ambient_diffuse = diffuse_weight
         * surface.base
         * hemisphere_irradiance(normal, view)
-        * PREVIEW_AMBIENT_SCALE;
+        * (PREVIEW_AMBIENT_SCALE * (1.0 + 0.40 * sss_strength));
     let reflection = reflect(-view, normal);
     let environment_fresnel = fresnel_schlick(normal_view, f0);
     let environment_visibility = mix(0.82, 0.24, roughness);

@@ -72,6 +72,7 @@ pub struct ActorAssets {
     pub skeleton: ModelSkeleton,
     pub options: PreparedModelOptions,
     partials: Vec<PartialRig>,
+    bind_points: Vec<assets::avfx::VfxBindPoint>,
 }
 
 #[inline(never)]
@@ -84,7 +85,26 @@ fn appearance_from_resource<R: physis::resource::Resource>(
         <physis::cmp::CMP as physis::ReadableFile>::from_existing(physis::Platform::Win32, &bytes)
             .ok()?;
     let palette = assets::character_palette_from_cmp(&cmp);
-    Some(assets::appearance_colors_from_palette(customize, &palette))
+    let mut appearance = assets::appearance_colors_from_palette(customize, &palette);
+    // Use the shader parameter palettes (`skin`, `hair.main`) rather than the
+    // darker UI color-picker swatches (`skin_interface`, `hair_interface`).
+    if let Some(race) = cmp.races.get(customize.palette_group_index()) {
+        let skin = race.skin[usize::from(customize.skintone).min(race.skin.len() - 1)];
+        appearance.skin = [
+            f32::from(skin.red) / 255.0,
+            f32::from(skin.green) / 255.0,
+            f32::from(skin.blue) / 255.0,
+            f32::from(skin.alpha) / 255.0,
+        ];
+        let hair = race.hair[usize::from(customize.hair_tone).min(race.hair.len() - 1)].main;
+        appearance.main = [
+            f32::from(hair.red) / 255.0,
+            f32::from(hair.green) / 255.0,
+            f32::from(hair.blue) / 255.0,
+            f32::from(hair.alpha) / 255.0,
+        ];
+    }
+    Some(appearance)
 }
 
 impl ActorAssets {
@@ -131,10 +151,25 @@ impl ActorAssets {
             request.customize.race_code(),
         )?;
         let visible = assets::character_enabled_attribute_names(&request.customize, &data.model);
+        let mut seen_points = HashSet::new();
+        let mut bind_points = Vec::new();
+        for path in &data.model.loaded_paths {
+            if path.ends_with(".mdl")
+                && let Ok(bytes) = source.read(path)
+                && let Ok(pts) = super::pose::mdl_points(&bytes)
+            {
+                for pt in pts {
+                    if seen_points.insert(pt.id) {
+                        bind_points.push(pt);
+                    }
+                }
+            }
+        }
         Ok(Self {
             model: data.model,
             skeleton,
             partials,
+            bind_points,
             options: PreparedModelOptions::default()
                 .with_component_preview_layout(false)
                 .with_enabled_attribute_names(visible),
@@ -288,6 +323,8 @@ pub(super) struct Actor {
     skeleton: ModelSkeleton,
     palette: Vec<(usize, Mat4, Option<(usize, usize)>)>,
     partials: Vec<PartialRig>,
+    bind_points: Vec<assets::avfx::VfxBindPoint>,
+    last_pose: SkeletonPose,
     worlds: Vec<[f32; 16]>,
     model_worlds: Vec<[f32; 16]>,
     placement: Mat4,
@@ -296,6 +333,33 @@ pub(super) struct Actor {
     left_hand: Option<usize>,
     left_world: Option<[f32; 16]>,
     grip: [f32; 16],
+}
+
+impl Actor {
+    pub(super) fn action_elements(&self) -> Result<Vec<assets::VfxBinderTargetSnapshot>> {
+        if self.bind_points.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut elements = assets::VfxRuntime::bind_point_pose_targets(
+            &self.bind_points,
+            &self.skeleton,
+            &self.last_pose,
+        )
+        .map_err(anyhow::Error::msg)?;
+        if self.placement != Mat4::IDENTITY {
+            let linear = glam::Mat3::from_mat4(self.placement);
+            for e in &mut elements {
+                let p = self
+                    .placement
+                    .transform_point3(glam::Vec3::from(e.matrix.position));
+                e.matrix.position = p.to_array();
+                for col in &mut e.matrix.basis {
+                    *col = (linear * glam::Vec3::from(*col)).to_array();
+                }
+            }
+        }
+        Ok(elements)
+    }
 }
 
 impl EffectPlayer {
@@ -381,9 +445,11 @@ impl EffectPlayer {
         let actor = Actor {
             bind_sphere: mesh.bounds_sphere(),
             mesh,
+            last_pose: pose.clone(),
             skeleton: data.skeleton,
             palette,
             partials: data.partials,
+            bind_points: data.bind_points,
             model_worlds: bind.clone(),
             worlds: bind,
             placement: Mat4::IDENTITY,
@@ -465,6 +531,7 @@ impl EffectPlayer {
             "wrong actor pose length"
         );
         let model_worlds = assets::world_matrices(&a.skeleton, pose);
+        a.last_pose = pose.clone();
         let placement = a.placement;
         self.install_actor_worlds(model_worlds, placement)
     }
