@@ -192,13 +192,13 @@ impl EffectPlayer {
                         chara_type,
                     },
                 };
-                let (data, skeleton) =
+                let (data, _skeleton) =
                     assets::load_chara_model_with_skeleton_from_resource(source, &req)?;
-                instances.push(self.renderer.context().create_model_with_skeleton(
-                    &data,
-                    opts,
-                    skeleton.as_ref(),
-                ));
+                instances.push(
+                    self.renderer
+                        .context()
+                        .create_model_with_skeleton(&data, opts, None),
+                );
             }
             StandaloneSpec::Furniture {
                 furniture_kind,
@@ -236,6 +236,7 @@ impl EffectPlayer {
                     ("_sho.mdl", (*feet_id).max(1), (*feet_variant).max(1)),
                     ("_dwn.mdl", 1, 1),
                 ];
+                let mut errors = Vec::new();
                 for (suffix, base_id, variant_id) in slots {
                     let req = CharaModelLoadRequest {
                         item_id: 0,
@@ -252,16 +253,25 @@ impl EffectPlayer {
                         inner: source.clone(),
                         allow_suffix: suffix,
                     };
-                    if let Ok((data, skeleton)) =
-                        assets::load_chara_model_with_skeleton_from_resource(&mut filtered, &req)
+                    match assets::load_chara_model_with_skeleton_from_resource(&mut filtered, &req)
                     {
-                        instances.push(self.renderer.context().create_model_with_skeleton(
-                            &data,
-                            opts.clone(),
-                            skeleton.as_ref(),
-                        ));
+                        Ok((data, _skeleton)) => {
+                            instances.push(self.renderer.context().create_model_with_skeleton(
+                                &data,
+                                opts.clone(),
+                                None,
+                            ));
+                        }
+                        Err(e) => {
+                            errors.push(format!("e{base_id:04}{suffix}: {e}"));
+                        }
                     }
                 }
+                anyhow::ensure!(
+                    !instances.is_empty(),
+                    "failed to load any chocobo slot: {}",
+                    errors.join("; ")
+                );
             }
         }
         self.standalone = instances;
