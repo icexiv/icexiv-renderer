@@ -45,6 +45,45 @@ impl EffectPlayer {
     pub fn action_player_mut(&mut self) -> Option<&mut ActionPlayer> {
         self.action.as_mut().map(|(p, _)| p)
     }
+    /// Deterministically seek the active action (and its C012 AVFX particles)
+    /// to `seconds` at 60 Hz simulation cadence without intermediate GPU draws.
+    pub fn seek_action_with_host(
+        &mut self,
+        seconds: f64,
+        mut host: impl FnMut(&mut Self, f64) -> Result<()>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            seconds.is_finite() && seconds >= 0.,
+            "invalid action seek time"
+        );
+        let Some((_, origin)) = self.action else {
+            return Ok(());
+        };
+        let target_tick = (seconds * 60.).round() as u64;
+        let current_tick = self.tick.saturating_sub(origin);
+        let start_step = if target_tick < current_tick {
+            self.random.reset();
+            if let Some((action, orig)) = &mut self.action {
+                action.environment = self.random.borrowed();
+                action.reset();
+                *orig = self.tick;
+            }
+            0
+        } else {
+            current_tick
+        };
+        let origin = self.action.as_ref().unwrap().1;
+        for step in start_step..=target_tick {
+            self.tick = origin + step;
+            let t = step as f64 / 60.;
+            host(self, t)?;
+            if let Some((action, _)) = &mut self.action {
+                action.advance_to(t)?;
+            }
+        }
+        self.remainder = 0.;
+        Ok(())
+    }
     pub fn trigger_resident(
         &mut self,
         owner_mdl: &str,

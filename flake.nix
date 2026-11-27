@@ -138,7 +138,7 @@
             mkdir -p $out
             wasm-bindgen --target web --out-dir $out/pkg target/wasm32-unknown-unknown/release/icexiv_renderer.wasm
             cp package.json README.md $out/
-            cp web/component.js web/component.d.ts $out/pkg/
+            cp web/component.js web/component.d.ts web/icexiv-viewport.js web/icexiv-controls.js web/icexiv-timeline.js $out/pkg/
             mkdir -p $out/pkg/effects
             cp ${effectSdk}/* web/effect-worker.js $out/pkg/effects/
           '';

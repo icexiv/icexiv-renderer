@@ -26,6 +26,8 @@ fn walk(
     calls: &mut Vec<Value>,
     output: &mut Vec<Value>,
     clips: &mut Option<Vec<Value>>,
+    props: &mut Vec<Value>,
+    sounds: &mut Vec<Value>,
     budget: &mut usize,
 ) -> Result<()> {
     if path.is_empty()
@@ -51,11 +53,14 @@ fn walk(
     let [t] = timelines.as_slice() else {
         return Err("expected one standalone timeline".into());
     };
-    walk_timeline(read, t, path, stack, calls, output, clips, budget)?;
+    walk_timeline(
+        read, t, path, stack, calls, output, clips, props, sounds, budget,
+    )?;
     stack.pop();
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_timeline(
     read: &mut impl FnMut(&str) -> Result<Vec<u8>>,
     t: &Timeline<'_>,
@@ -64,14 +69,49 @@ fn walk_timeline(
     calls: &mut Vec<Value>,
     output: &mut Vec<Value>,
     clips: &mut Option<Vec<Value>>,
+    props: &mut Vec<Value>,
+    sounds: &mut Vec<Value>,
     budget: &mut usize,
 ) -> Result<()> {
     for l in t.command_links(4 << 20, 1_000_000)? {
+        let entry = &t.entries[l.command];
+        if entry.tag == *b"C198" && entry.payload.len() == 32 {
+            let word = |o: usize| u32::from_le_bytes(entry.payload[o..o + 4].try_into().unwrap());
+            let id = (word(0) & 0xffff) as u16;
+            let start = (word(0) >> 16) as i16;
+            let duration = word(4) as i32;
+            let slot = word(20) & 0xff;
+            let model_word = word(24);
+            let variant_word = word(28);
+            let model_id = (model_word & 0xffff) as u16;
+            let body_id = (model_word >> 16) as u16;
+            let variant_id = (variant_word & 0xffff) as u16;
+            if model_id != 0 && body_id != 0 {
+                let actor = t.actor(l.actor)?;
+                let track = t.track(l.track)?;
+                let conditions = track.conditions().map(|cs| {
+                    cs.map(|c| [c.operation, c.value, c.float_value.to_bits()])
+                        .collect::<Vec<_>>()
+                });
+                calls.push(json!({"tmb":path,"actor":actor.id,"actor_start":actor.start,"ability_delay":actor.ability_delay,"track":track.id,"track_start":track.start,"conditions":conditions,"command":id,"start":start,"duration":duration}));
+                let bone = if slot == 1 { "n_buki_l" } else { "n_buki_r" };
+                let packed =
+                    ((variant_id as u64) << 32) | ((body_id as u64) << 16) | (model_id as u64);
+                props.push(json!({"chain":calls,"modelMain":packed.to_string(),"modelId":model_id,"bodyId":body_id,"variantId":variant_id,"bone":bone}));
+                calls.pop();
+            }
+            continue;
+        }
         let Some(r) = t.command_resource(l.command)? else {
             continue;
         };
-        let c010 = clips.is_some() && t.entries[l.command].tag == *b"C010";
-        if !c010 && !matches!(r.kind, ResourceKind::Timeline | ResourceKind::Effect) {
+        let c010 = clips.is_some() && matches!(&entry.tag, b"C010" | b"C009");
+        if !c010
+            && !matches!(
+                r.kind,
+                ResourceKind::Timeline | ResourceKind::Effect | ResourceKind::Sound
+            )
+        {
             continue;
         }
         let actor = t.actor(l.actor)?;
@@ -88,7 +128,13 @@ fn walk_timeline(
             } else {
                 format!("{name}.tmb")
             };
-            walk(read, &name, stack, calls, output, clips, budget)?;
+            walk(
+                read, &name, stack, calls, output, clips, props, sounds, budget,
+            )?;
+        } else if r.kind == ResourceKind::Sound {
+            if sounds.len() < 1024 {
+                sounds.push(json!({"chain":calls,"scd":name}));
+            }
         } else if c010 {
             let clips = clips.as_mut().unwrap();
             if clips.len() >= 1024 {
@@ -121,6 +167,8 @@ fn main() -> Result<()> {
     let root = Path::new(&args[1]);
     let mut events = vec![];
     let mut clips = (args.get(3).map(String::as_str) == Some("--clips")).then(Vec::new);
+    let mut props = vec![];
+    let mut sounds = vec![];
     walk(
         &mut |p| {
             let resource = root.join(p);
@@ -134,6 +182,8 @@ fn main() -> Result<()> {
         &mut vec![],
         &mut events,
         &mut clips,
+        &mut props,
+        &mut sounds,
         &mut 1024,
     )?;
     if let Some(clips) = clips {

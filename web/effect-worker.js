@@ -89,6 +89,30 @@ async function dispatch(m) {
         viewer.frame(m.yaw,m.pitch,m.distance,0,false);
         await viewer.submitted();
         break;
+      case "openScene":
+        await init();
+        canvas = m.canvas;
+        ownerFiles = null;
+        viewer = await WeaponEffectViewer.create_scene(canvas);
+        break;
+      case "setPan":
+        viewer.set_pan(m.x, m.y);
+        break;
+      case "addProp":
+        viewer.add_prop(m.propId, BigInt(m.main), m.bone, m.grip, bundle(m.entries));
+        break;
+      case "setPropVisible":
+        viewer.set_prop_visible(m.propId, !!m.visible);
+        break;
+      case "clearProps":
+        viewer.clear_props();
+        break;
+      case "setActionOccurrenceEnabled":
+        viewer.set_action_occurrence_enabled(m.occurrence, !!m.enabled);
+        break;
+      case "seekAction":
+        viewer.seek_action(m.seconds);
+        break;
       case "attach":
         viewer.attach(bundle([...ownerFiles, ...m.entries]));
         ownerFiles = null;
@@ -214,7 +238,7 @@ async function dispatch(m) {
         if (actionWarningCount !== undefined) {
           const count = viewer.action_warning_count();
           const age=viewer.preview_seconds();
-          value = {finished: viewer.action_finished() && (!sequence || age>=sequence.end), warnings: count > actionWarningCount
+          value = {age, finished: viewer.action_finished() && (!sequence || age>=sequence.end), warnings: count > actionWarningCount
             ? viewer.action_warnings_since(actionWarningCount) : undefined};
           if(m.report && sequence)value.clip=sequence.windowAt(age)??null;
           actionWarningCount = count;

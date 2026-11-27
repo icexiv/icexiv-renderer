@@ -130,6 +130,51 @@ pub fn c010_windows(clips: &str, preview: &str) -> Result<String, JsError> {
 }
 #[wasm_bindgen]
 impl WeaponEffectViewer {
+    /// Open an empty unified PBR + VFX scene with no mandatory weapon owner.
+    pub async fn create_scene(canvas: OffscreenCanvas) -> Result<Self, JsError> {
+        let instance = w::Instance::new(w::InstanceDescriptor {
+            backends: w::Backends::BROWSER_WEBGPU,
+            ..w::InstanceDescriptor::new_without_display_handle()
+        });
+        let surface = instance
+            .create_surface(w::SurfaceTarget::OffscreenCanvas(canvas.clone()))
+            .map_err(err)?;
+        let adapter = instance
+            .request_adapter(&w::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
+            .await
+            .map_err(err)?;
+        let (device, queue) = adapter
+            .request_device(&w::DeviceDescriptor {
+                required_limits: scene::ModelRenderContext::required_limits(adapter.limits()),
+                ..Default::default()
+            })
+            .await
+            .map_err(err)?;
+        let mut config = surface
+            .get_default_config(&adapter, canvas.width().max(1), canvas.height().max(1))
+            .ok_or_else(|| err("no WebGPU surface"))?;
+        let format = config.format.add_srgb_suffix();
+        if format != config.format {
+            config.view_formats.push(format);
+        }
+        surface.configure(&device, &config);
+        let player = EffectPlayer::new_empty(device.clone(), queue, format);
+        Ok(Self {
+            actor_motion: None,
+            canvas,
+            owner: crate::empty_model_data(),
+            options: scene::PreparedModelOptions::default().with_component_preview_layout(false),
+            surface,
+            device,
+            config,
+            player,
+            hand: None,
+            action_hand: None,
+        })
+    }
     pub async fn create(
         canvas: OffscreenCanvas,
         main: u64,
@@ -230,6 +275,67 @@ impl WeaponEffectViewer {
         );
         self.player.pose = Some(super::pose::OwnerPose::from_bind(skeleton));
         Ok(())
+    }
+    pub fn set_pan(&mut self, x: f32, y: f32) -> Result<(), JsError> {
+        self.player.set_pan([x, y]).map_err(err)
+    }
+    pub fn add_prop(
+        &mut self,
+        id: String,
+        main: u64,
+        bone: String,
+        grip: &[f32],
+        files: EffectFiles,
+    ) -> Result<(), JsError> {
+        let grip: [f32; 16] = grip
+            .try_into()
+            .map_err(|_| err("expected 16-element prop grip matrix"))?;
+        let data = crate::prop::PropAssets::load(&mut MemoryResource::new(files.files), main)
+            .map_err(err)?;
+        self.player.add_prop(id, data, bone, grip).map_err(err)
+    }
+    pub fn set_prop_visible(&mut self, id: &str, visible: bool) -> Result<(), JsError> {
+        self.player.set_prop_visible(id, visible).map_err(err)
+    }
+    pub fn clear_props(&mut self) {
+        self.player.clear_props();
+    }
+    pub fn set_action_occurrence_enabled(
+        &mut self,
+        occurrence: usize,
+        enabled: bool,
+    ) -> Result<(), JsError> {
+        self.player
+            .action_player_mut()
+            .ok_or_else(|| err("no active action"))?
+            .set_occurrence_enabled(occurrence, enabled);
+        Ok(())
+    }
+    pub fn seek_action(&mut self, seconds: f64) -> Result<(), JsError> {
+        let action_hand = self.action_hand.clone();
+        self.player
+            .seek_action_with_host(seconds, |player, age| {
+                if let Some((sample, grip, target)) = &action_hand {
+                    if let Some(grip) = grip {
+                        sample_grip(player, sample, grip, age)?;
+                    } else {
+                        let n = player
+                            .actor_skeleton()
+                            .ok_or_else(|| anyhow::anyhow!("actor removed"))?
+                            .bone_count();
+                        player.set_actor_locals(
+                            &actor_locals(sample, age, n).map_err(|e| anyhow::anyhow!("{e:?}"))?,
+                        )?;
+                    }
+                    if let Some(target) = target {
+                        refresh_action_weapon(player, *target)?;
+                    } else if grip.is_none() {
+                        player.refresh_equipped_action_weapons()?;
+                    }
+                }
+                Ok(())
+            })
+            .map_err(err)
     }
     pub fn reset(&mut self) {
         self.player.reset();

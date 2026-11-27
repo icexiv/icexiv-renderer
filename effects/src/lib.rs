@@ -11,6 +11,7 @@ mod composite;
 pub mod offhand;
 mod particles;
 mod pose;
+pub mod prop;
 pub mod timeline;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -165,6 +166,7 @@ pub struct EffectPlayer {
     random: particles::ParticleEnvironment,
     offhand: Option<offhand::Offhand>,
     actor: Option<actor::Actor>,
+    props: Vec<prop::Prop>,
     action: Option<(timeline::ActionPlayer, u64)>,
     renderer: ModelRenderer,
     pose: Option<pose::OwnerPose>,
@@ -175,6 +177,7 @@ pub struct EffectPlayer {
     composite: composite::Composite,
     resident_visible: bool,
     owner_visible: bool,
+    pan: [f32; 2],
     depth: Option<([u32; 2], wgpu::TextureView)>,
     tick: u64,
     resident_origin: u64,
@@ -184,7 +187,54 @@ pub struct EffectPlayer {
     particle_tone: [f32; 3],
 }
 
+pub(crate) fn empty_model_data() -> WeaponModelData {
+    WeaponModelData {
+        item_id: 0,
+        item_name: String::new(),
+        model_main: assets::PackedModelId::from_raw(0),
+        model_sub: None,
+        stain_ids: [0; 2],
+        load_diagnostics: Vec::new(),
+        loaded_paths: Vec::new(),
+        bounds: assets::ModelBounds {
+            min: [0.; 3],
+            max: [0.; 3],
+            center: [0.; 3],
+            radius: 1.,
+        },
+        materials: Vec::new(),
+        textures: Vec::new(),
+        meshes: Vec::new(),
+    }
+}
+
 impl EffectPlayer {
+    /// Open an empty unified PBR + VFX scene with no mandatory weapon owner.
+    pub fn new_empty(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        let empty = empty_model_data();
+        let renderer = ModelRenderer::new_with_skeleton_and_prepared_options(
+            device,
+            queue,
+            format,
+            &empty,
+            PreparedModelOptions::default().with_component_preview_layout(false),
+            None,
+        );
+        let mut player = Self::from_renderer(renderer, Default::default());
+        player.owner_visible = false;
+        player
+    }
+    pub fn set_pan(&mut self, pan: [f32; 2]) -> Result<()> {
+        if !pan.into_iter().all(f32::is_finite) {
+            bail!("invalid camera pan");
+        }
+        self.pan = pan;
+        Ok(())
+    }
     pub fn new(
         device: wgpu::Device,
         queue: wgpu::Queue,
@@ -215,6 +265,7 @@ impl EffectPlayer {
             random: Default::default(),
             actor: None,
             offhand: None,
+            props: Vec::new(),
             action: None,
             renderer,
             pose: pose::OwnerPose::new(&mounts),
@@ -225,6 +276,7 @@ impl EffectPlayer {
             composite: Default::default(),
             resident_visible: true,
             owner_visible: true,
+            pan: [0.; 2],
             depth: None,
             tick: 0,
             resident_origin: 0,
@@ -372,8 +424,15 @@ impl EffectPlayer {
         host(self, self.host_tick as f64 / 60.)?;
         let advance = |player: &mut Self| -> Result<()> {
             let (ctx, weapon) = player.renderer.scene_parts();
-            let instances = scene_models(weapon, player.actor.as_ref(), player.offhand.as_ref(), player.owner_visible);
-            let cam = ctx.scene_camera_snapshot(&instances, size, yaw, pitch, zoom, [0.; 2], opts);
+            let instances = scene_models(
+                weapon,
+                player.actor.as_ref(),
+                player.offhand.as_ref(),
+                &player.props,
+                player.owner_visible,
+            );
+            let cam =
+                ctx.scene_camera_snapshot(&instances, size, yaw, pitch, zoom, player.pan, opts);
             player.prepare_playback(cam)?;
             if let Some(o) = &mut player.offhand {
                 o.advance(player.renderer.context(), cam, player.tick, &player.random)?;
@@ -443,7 +502,13 @@ impl EffectPlayer {
             auras.extend(o.unambiguous_active_aura_resources());
         }
         let (ctx, weapon) = self.renderer.scene_parts();
-        let instances = scene_models(weapon, self.actor.as_ref(), self.offhand.as_ref(), self.owner_visible);
+        let instances = scene_models(
+            weapon,
+            self.actor.as_ref(),
+            self.offhand.as_ref(),
+            &self.props,
+            self.owner_visible,
+        );
         let mut batches = Vec::with_capacity(3);
         batches.extend(p.map(|v| v.particles()));
         batches.extend(offhand_particles.map(|v| v.particles()));
@@ -456,7 +521,7 @@ impl EffectPlayer {
             yaw,
             pitch,
             zoom,
-            [0.; 2],
+            self.pan,
             opts,
             &batches,
             &auras,
@@ -469,11 +534,13 @@ fn scene_models<'a>(
     weapon: &'a scene::ModelInstance,
     actor: Option<&'a actor::Actor>,
     offhand: Option<&'a offhand::Offhand>,
+    props: &'a [prop::Prop],
     owner_visible: bool,
 ) -> Vec<&'a scene::ModelInstance> {
     weapon_instances(weapon, owner_visible)
         .chain(actor.map(|a| &a.mesh))
         .chain(offhand.map(|o| &o.mesh))
+        .chain(props.iter().filter(|p| p.visible).map(|p| &p.mesh))
         .collect()
 }
 

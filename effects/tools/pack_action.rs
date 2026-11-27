@@ -2,12 +2,145 @@ use super::{Result, Timeline, TimelineLimits, walk, walk_timeline};
 use icexiv_data::{
     avfx::Avfx,
     excel::{Exd, Exh, Language},
+    imc::Imc,
+    mdl::Mdl,
+    mtrl::Mtrl,
     pap::Pap,
     sqpack::{SqPack, local::Local},
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
+
+fn timeline_key(read: &mut impl FnMut(&str) -> Result<Vec<u8>>, row: u32) -> Result<String> {
+    let (h, d) = sheet(read, "actiontimeline", row)?;
+    let table = Exd::parse(&d, &h)?;
+    let timeline = table.row(row)?.ok_or("action timeline not found")?;
+    #[cfg(not(feature = "data-snapshot"))]
+    let key = timeline.action_timeline_key()?;
+    #[cfg(feature = "data-snapshot")]
+    let key = match timeline.field(6)? {
+        icexiv_data::excel::Value::String(key)
+            if timeline.subrow_id().is_none()
+                && h.fixed_row_size() == 24
+                && h.columns().len() == 22
+                && h.columns()[6].offset == 0 =>
+        {
+            key
+        }
+        _ => return Err("unsupported ActionTimeline key column".into()),
+    };
+    let key = std::str::from_utf8(key)?;
+    if key.is_empty() {
+        return Err("ActionTimeline key is empty".into());
+    }
+    Ok(key.to_owned())
+}
+
+fn shift_chain_start(item: &mut Value, offset: i64) {
+    if offset == 0 {
+        return;
+    }
+    if let Some(first) = item
+        .get_mut("chain")
+        .and_then(Value::as_array_mut)
+        .and_then(|a| a.first_mut())
+        && let Some(obj) = first.as_object_mut()
+    {
+        let cur = obj.get("actor_start").and_then(Value::as_i64).unwrap_or(0);
+        obj.insert("actor_start".into(), json!(cur + offset));
+    }
+}
+
+fn phase_duration(clips: &[Value]) -> i64 {
+    clips
+        .iter()
+        .filter_map(|c| c.get("chain")?.as_array()?.last())
+        .map(|l| {
+            let s = l.get("start").and_then(Value::as_i64).unwrap_or(0)
+                + l.get("track_start").and_then(Value::as_i64).unwrap_or(0)
+                + l.get("actor_start").and_then(Value::as_i64).unwrap_or(0);
+            let d = l.get("duration").and_then(Value::as_i64).unwrap_or(0);
+            (s + d).max(0)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn store_weapon_prop(
+    sq: &SqPack<Local>,
+    rt: &tokio::runtime::Runtime,
+    bundle: &mut Bundle<'_>,
+    model_id: u16,
+    body_id: u16,
+    variant_id: u16,
+) -> Result<()> {
+    let try_read = |p: &str| -> Result<Option<Vec<u8>>> {
+        match rt.block_on(sq.read(p)) {
+            Ok(b) => Ok(Some(b)),
+            Err(icexiv_data::sqpack::Error::MissingResource(_)) => Ok(None),
+            Err(e) => Err(format!("{p}: {e}").into()),
+        }
+    };
+    let root = format!("chara/weapon/w{model_id:04}/obj/body/b{body_id:04}");
+    let mdl_path = format!("{root}/model/w{model_id:04}b{body_id:04}.mdl");
+    let Some(mdl_bytes) = try_read(&mdl_path)? else {
+        return Ok(());
+    };
+    bundle.store(&mdl_path, &mdl_bytes)?;
+    let sk_path =
+        format!("chara/weapon/w{model_id:04}/skeleton/base/b0001/skl_w{model_id:04}b0001.sklb");
+    if let Some(sk) = try_read(&sk_path)? {
+        bundle.store(&sk_path, &sk)?;
+    }
+    let imc_path = format!("{root}/b{body_id:04}.imc");
+    let mut mat_variant = variant_id.max(1);
+    if let Some(imc_bytes) = try_read(&imc_path)? {
+        bundle.store(&imc_path, &imc_bytes)?;
+        if let Ok(imc) = Imc::parse(&imc_bytes)
+            && let Ok(entry) = imc.entry(variant_id, 0)
+        {
+            mat_variant = u16::from(entry.material_id).max(1);
+        }
+    }
+    let mdl = Mdl::parse(&mdl_bytes)?;
+    for i in 0..mdl.material_count() {
+        let name = std::str::from_utf8(mdl.material(i)?)?.trim_start_matches('/');
+        let candidates = if name.starts_with("chara/") || name.starts_with("bgcommon/") {
+            vec![name.to_owned()]
+        } else {
+            vec![
+                format!("{root}/material/v{mat_variant:04}/{name}"),
+                format!("{root}/material/{name}"),
+                format!("{root}/material/v0001/{name}"),
+            ]
+        };
+        for mtrl_path in candidates {
+            if let Some(mtrl_bytes) = try_read(&mtrl_path)? {
+                bundle.store(&mtrl_path, &mtrl_bytes)?;
+                let mtrl = Mtrl::parse(&mtrl_bytes)?;
+                for t in 0..mtrl.texture_count() {
+                    let tp = std::str::from_utf8(mtrl.texture(t)?.path)?;
+                    if !tp.is_empty()
+                        && !bundle.files.contains_key(tp)
+                        && let Some(tb) = try_read(tp)?
+                    {
+                        bundle.store(tp, &tb)?;
+                    }
+                }
+                let shpk = std::str::from_utf8(mtrl.shader_package()?)?;
+                let shpk_path = format!("shader/sm5/shpk/{shpk}");
+                if !bundle.files.contains_key(&shpk_path)
+                    && let Some(sb) = try_read(&shpk_path)?
+                {
+                    bundle.store(&shpk_path, &sb)?;
+                }
+                break;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn sheet(
     read: &mut impl FnMut(&str) -> Result<Vec<u8>>,
@@ -59,7 +192,10 @@ impl Bundle<'_> {
 /// Resolve a sheet ID to its TMB and archive the exact resources the preview consumes.
 pub(super) fn run(args: &[String]) -> Result<()> {
     if args.len() < 3 {
-        return Err("expected SQPACK (ACTION_ID | --timeline TIMELINE_ID) CAS [--actor RACE] [PAP ...]".into());
+        return Err(
+            "expected SQPACK (ACTION_ID | --timeline TIMELINE_ID) CAS [--actor RACE] [PAP ...]"
+                .into(),
+        );
     }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -70,9 +206,20 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     };
     // Emote items reference ActionTimeline rows directly; live actions go
     // through the Action sheet first.
-    let (id, row, cas_index) = if args[1] == "--timeline" {
+    let (id, rows, cas_index) = if args[1] == "--timeline" {
         let row: u32 = args.get(2).ok_or("missing timeline ID")?.parse()?;
-        (None, row, 3)
+        (None, vec![row], 3)
+    } else if args[1] == "--timelines" {
+        let raw = args.get(2).ok_or("missing timeline IDs")?;
+        let rows: Vec<u32> = raw
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.parse::<u32>())
+            .collect::<std::result::Result<_, _>>()?;
+        if rows.is_empty() {
+            return Err("empty --timelines list".into());
+        }
+        (None, rows, 3)
     } else {
         let id: u32 = args[1].parse()?;
         let (h, d) = sheet(&mut read, "action", id)?;
@@ -94,42 +241,65 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         };
         let row = u32::try_from(row)
             .map_err(|_| format!("Action {id} has no nonnegative timeline ID"))?;
-        (Some(id), row, 2)
+        (Some(id), vec![row], 2)
     };
-    let (h, d) = sheet(&mut read, "actiontimeline", row)?;
-    let table = Exd::parse(&d, &h)?;
-    let timeline = table.row(row)?.ok_or("action timeline not found")?;
-    #[cfg(not(feature = "data-snapshot"))]
-    let key = timeline.action_timeline_key()?;
-    #[cfg(feature = "data-snapshot")]
-    let key = match timeline.field(6)? {
-        icexiv_data::excel::Value::String(key)
-            if timeline.subrow_id().is_none()
-                && h.fixed_row_size() == 24
-                && h.columns().len() == 22
-                && h.columns()[6].offset == 0 =>
-        {
-            key
-        }
-        _ => return Err("unsupported ActionTimeline key column".into()),
-    };
-    let key = std::str::from_utf8(key)?;
-    if key.is_empty() {
-        return Err("ActionTimeline key is empty".into());
-    }
-    let entry = format!("chara/action/{key}.tmb");
     let mut events = vec![];
-    let mut clips = Some(vec![]);
-    walk(
-        &mut read,
-        &entry,
-        &mut vec![],
-        &mut vec![],
-        &mut events,
-        &mut clips,
-        &mut 1024,
-    )?;
-    let clips = clips.unwrap();
+    let mut clips = vec![];
+    let mut props = vec![];
+    let mut sounds = vec![];
+    let mut phases = vec![];
+    let mut entries = vec![];
+    let mut keys = vec![];
+    let mut cursor = 0i64;
+    for &r in &rows {
+        let key = timeline_key(&mut read, r)?;
+        let entry = format!("chara/action/{key}.tmb");
+        let mut ph_events = vec![];
+        let mut ph_clips = Some(vec![]);
+        let mut ph_props = vec![];
+        let mut ph_sounds = vec![];
+        walk(
+            &mut read,
+            &entry,
+            &mut vec![],
+            &mut vec![],
+            &mut ph_events,
+            &mut ph_clips,
+            &mut ph_props,
+            &mut ph_sounds,
+            &mut 1024,
+        )?;
+        let mut ph_clips = ph_clips.unwrap();
+        let dur = phase_duration(&ph_clips);
+        for item in ph_clips
+            .iter_mut()
+            .chain(ph_events.iter_mut())
+            .chain(ph_props.iter_mut())
+            .chain(ph_sounds.iter_mut())
+        {
+            shift_chain_start(item, cursor);
+        }
+        let phase_kind = if key.ends_with("_start") {
+            "start"
+        } else if key.ends_with("_loop") {
+            "loop"
+        } else if key.ends_with("_end") {
+            "end"
+        } else {
+            "main"
+        };
+        phases.push(json!({"kind": phase_kind, "timeline": r, "key": key, "start": cursor, "end": cursor + dur}));
+        cursor += dur;
+        clips.extend(ph_clips);
+        events.extend(ph_events);
+        props.extend(ph_props);
+        sounds.extend(ph_sounds);
+        entries.push(entry);
+        keys.push(key);
+    }
+    let row = rows[0];
+    let entry = entries[0].clone();
+    let key = keys[0].as_str();
     let mut bundle = Bundle {
         cas: Path::new(&args[cas_index]),
         files: BTreeMap::new(),
@@ -217,6 +387,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                             &mut calls,
                             &mut events,
                             &mut None,
+                            &mut props,
+                            &mut sounds,
                             &mut 1024,
                         )?;
                     }
@@ -245,12 +417,21 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             }
         }
     }
+    for p in &props {
+        if let (Some(mid), Some(bid), Some(vid)) = (
+            p.get("modelId").and_then(Value::as_u64),
+            p.get("bodyId").and_then(Value::as_u64),
+            p.get("variantId").and_then(Value::as_u64),
+        ) {
+            store_weapon_prop(&sq, &rt, &mut bundle, mid as u16, bid as u16, vid as u16)?;
+        }
+    }
     let unresolved: Vec<_> = clips
         .iter()
         .filter_map(|c| c["name"].as_str())
         .filter(|n| !paps.contains_key(*n))
         .collect();
-    let manifest: Value = json!({"action":id,"timeline":row,"entry":entry,"effects":events,"clips":clips,
+    let manifest: Value = json!({"action":id,"timeline":row,"entry":entry,"phases":phases,"effects":events,"clips":clips,"props":props,"sounds":sounds,
         "files":bundle.files,"sklb":sklb,"paps":paps,"unresolvedClips":unresolved});
     serde_json::to_writer(std::io::stdout().lock(), &manifest)?;
     Ok(())

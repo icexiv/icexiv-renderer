@@ -336,6 +336,12 @@ pub(super) struct Actor {
 }
 
 impl Actor {
+    pub(super) fn bone_world(&self, name: &str) -> Option<[f32; 16]> {
+        self.skeleton
+            .bone_index(name)
+            .and_then(|i| self.worlds.get(i).copied())
+    }
+
     pub(super) fn action_elements(&self) -> Result<Vec<assets::VfxBinderTargetSnapshot>> {
         if self.bind_points.is_empty() {
             return Ok(Vec::new());
@@ -397,10 +403,12 @@ impl EffectPlayer {
         grip: [f32; 16],
         pose: &SkeletonPose,
     ) -> Result<()> {
-        ensure!(
-            !self.renderer.joint_names().is_empty(),
-            "weapon MDL has no prepared skin palette"
-        );
+        if self.pose.is_some() {
+            ensure!(
+                !self.renderer.joint_names().is_empty(),
+                "weapon MDL has no prepared skin palette"
+            );
+        }
         let hand = data
             .skeleton
             .bone_index(hand)
@@ -467,8 +475,11 @@ impl EffectPlayer {
     }
     pub fn clear_actor(&mut self) -> Result<()> {
         if self.actor.is_some() {
-            self.set_local_pose(&self.rest_local_pose())?;
+            if self.pose.is_some() {
+                self.set_local_pose(&self.rest_local_pose())?;
+            }
             self.clear_offhand();
+            self.clear_props();
             self.actor = None;
         }
         Ok(())
@@ -566,7 +577,9 @@ impl EffectPlayer {
         let hand = worlds[a.hand];
         let left_hand = a.left_hand.map(|i| worlds[i]);
         let grip = a.grip;
-        self.set_weapon_grip(&hand, &grip)?;
+        if self.pose.is_some() {
+            self.set_weapon_grip(&hand, &grip)?;
+        }
         self.update_offhand_grip(left_hand)?;
         let a = self.actor.as_mut().unwrap();
         a.model_worlds = model_worlds;
@@ -581,6 +594,7 @@ impl EffectPlayer {
         a.worlds = worlds;
         a.mesh
             .update_joint_matrices(self.renderer.context(), &matrices);
+        self.update_props()?;
         Ok(())
     }
 }

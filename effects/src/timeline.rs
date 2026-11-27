@@ -296,6 +296,7 @@ pub struct ActionPlayer {
     cues: Vec<Cue>,
     assets: Vec<Asset>,
     live: Vec<Live>,
+    disabled_occurrences: std::collections::HashSet<usize>,
     next: usize,
     time: f64,
     pub diagnostics: Vec<String>,
@@ -549,6 +550,7 @@ impl ActionPlayer {
                 cues,
                 assets,
                 live: vec![],
+                disabled_occurrences: Default::default(),
                 next: 0,
                 time: 0.,
                 initial_diagnostics: diagnostics.len(),
@@ -701,6 +703,13 @@ impl ActionPlayer {
         };
         doc.configure_scheduler_fade(scheduler, frames, mode, inhibit_retirement)
             .map_err(anyhow::Error::msg)
+    }
+    pub fn set_occurrence_enabled(&mut self, occurrence: usize, enabled: bool) {
+        if enabled {
+            self.disabled_occurrences.remove(&occurrence);
+        } else {
+            self.disabled_occurrences.insert(occurrence);
+        }
     }
     pub fn finished(&self) -> bool {
         self.next == self.cues.len() && self.live.is_empty()
@@ -903,6 +912,9 @@ impl ActionPlayer {
         let (mut qs, mut ms) = (vec![], vec![]);
         for l in &self.live {
             let c = &self.cues[l.cue];
+            if self.disabled_occurrences.contains(&c.event) {
+                continue;
+            }
             let a = &self.assets[c.asset];
             l.playback.sample(&mut qs, &mut ms);
             ms.retain(|m| m.model_index < a.file.models.len());
