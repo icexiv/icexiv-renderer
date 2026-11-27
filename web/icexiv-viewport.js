@@ -4,8 +4,8 @@ const STUDIO_RGB = [37, 44, 49];
 const HOME = { yaw: 0.35, pitch: 0.1, zoom: 1, pan: [0, 0] };
 const PRESETS = {
   full: { yaw: 0.35, pitch: 0.1, zoom: 1.0, pan: [0, 0] },
-  upper: { yaw: 0.25, pitch: 0.08, zoom: 1.35, pan: [0, -0.22] },
-  head: { yaw: 0.18, pitch: 0.04, zoom: 1.85, pan: [0, -0.42] },
+  upper: { yaw: 0.25, pitch: 0.08, zoom: 1.45, pan: [0, 0.26] },
+  head: { yaw: 0.18, pitch: 0.04, zoom: 2.1, pan: [0, 0.56] },
 };
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const orbitDistance = (zoom, w, h) => 2.8 / zoom / Math.min(1, w / h);
